@@ -1,56 +1,68 @@
-OUTPUT_FORMAT(elf64-x86-64)
-OUTPUT_ARCH(i386:x86-64)
-
 ENTRY(kernel_main)
-
-PHDRS
-{
-    text   PT_LOAD FLAGS(5);
-    rodata PT_LOAD FLAGS(4);
-    data   PT_LOAD FLAGS(6);
-}
 
 SECTIONS
 {
     . = 0xffffffff80000000;
 
-    .text : ALIGN(4K)
-    {
-        KEEP(*(.text.entry))
-        *(.text*)
-    } :text
-
-    . = ALIGN(4K);
-
-    .limine_requests :
+    /*
+     * Limine requests must appear early in the kernel image.
+     */
+    .limine_requests_start : ALIGN(8)
     {
         KEEP(*(.limine_requests_start))
-        KEEP(*(.limine_requests))
-        KEEP(*(.limine_requests_end))
-    } :rodata
+    }
 
+    .limine_requests : ALIGN(8)
+    {
+        KEEP(*(.limine_requests))
+    }
+
+    .limine_requests_end : ALIGN(8)
+    {
+        KEEP(*(.limine_requests_end))
+    }
+
+    /*
+     * Executable kernel code.
+     */
+    .text : ALIGN(4K)
+    {
+        KEEP(*(.text.boot))
+        *(.text .text.*)
+    }
+
+    /*
+     * Read-only kernel data.
+     */
     .rodata : ALIGN(4K)
     {
-        *(.rodata*)
-    } :rodata
+        *(.rodata .rodata.*)
+    }
 
-    . = ALIGN(4K);
-
+    /*
+     * Writable initialized data.
+     */
     .data : ALIGN(4K)
     {
-        *(.data*)
-    } :data
+        *(.data .data.*)
+    }
 
+    /*
+     * Zero-initialized data.
+     */
     .bss : ALIGN(4K)
     {
         *(COMMON)
-        *(.bss*)
-    } :data
+        *(.bss .bss.*)
+    }
 
+    /*
+     * Kernel does not need these sections.
+     */
     /DISCARD/ :
     {
-        *(.comment)
         *(.eh_frame)
         *(.note*)
+        *(.comment)
     }
 }
