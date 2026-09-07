@@ -21,6 +21,18 @@ static volatile struct limine_framebuffer_request
     };
 
 /* ============================================================
+   LIMINE EXECUTABLE ADDRESS REQUEST
+   ============================================================ */
+
+__attribute__((used, section(".limine_requests")))
+static volatile struct limine_executable_address_request
+    limine_executable_address_request = {
+        .id = LIMINE_EXECUTABLE_ADDRESS_REQUEST_ID,
+        .revision = 0,
+        .response = NULL
+    };
+
+/* ============================================================
    SERIAL PORT
    ============================================================ */
 
@@ -571,6 +583,53 @@ void kernel_main(void)
     );
 
     /* --------------------------------------------------------
+       LIMINE EXECUTABLE ADDRESS VERIFICATION
+       -------------------------------------------------------- */
+
+    serial_write_string(
+        "\nEXECUTABLE ADDRESS VERIFICATION\n"
+    );
+
+    if (limine_executable_address_request.response)
+    {
+        uint64_t executable_physical =
+            limine_executable_address_request.response->physical_base;
+
+        uint64_t executable_virtual =
+            limine_executable_address_request.response->virtual_base;
+
+        serial_write_string(
+            "EXECUTABLE PHYSICAL BASE: "
+        );
+
+        serial_write_hex(
+            executable_physical
+        );
+
+        serial_write_string("\n");
+
+        serial_write_string(
+            "EXECUTABLE VIRTUAL BASE: "
+        );
+
+        serial_write_hex(
+            executable_virtual
+        );
+
+        serial_write_string("\n");
+
+        serial_write_string(
+            "EXECUTABLE ADDRESS: OK\n"
+        );
+    }
+    else
+    {
+        serial_write_string(
+            "EXECUTABLE ADDRESS: FAILED\n"
+        );
+    }
+
+    /* --------------------------------------------------------
        FRAMEBUFFER
        -------------------------------------------------------- */
 
@@ -876,11 +935,11 @@ void kernel_main(void)
     serial_write_string("\n");
 
     /*
-     * VMM-1 only creates and tests the page-table hierarchy.
+     * VMM-2A test virtual address.
      *
-     * We intentionally do NOT load this PML4 into CR3 yet.
+     * This address is used inside the software
+     * page-table structure.
      */
-
     uint64_t test_virtual =
         0x0000000040000000ULL;
 
@@ -915,14 +974,394 @@ void kernel_main(void)
         );
     }
 
-    /*
-     * The test frame is no longer needed after the
-     * page-table construction test.
-     */
-    pmm_free_frame(test_frame);
+    /* --------------------------------------------------------
+       VMM-2A SOFTWARE TRANSLATION TEST
+       -------------------------------------------------------- */
 
     serial_write_string(
-        "VMM INFRASTRUCTURE: OK\n"
+        "\nVMM-2A TRANSLATION TEST\n"
+    );
+
+    uint64_t translated_address = 0;
+
+    int translate_result =
+        vmm_translate(
+            pml4,
+            test_virtual,
+            &translated_address
+        );
+
+    serial_write_string(
+        "TRANSLATION RESULT: "
+    );
+
+    serial_write_hex(
+        (uint64_t)translate_result
+    );
+
+    serial_write_string("\n");
+
+    serial_write_string(
+        "VIRTUAL ADDRESS: "
+    );
+
+    serial_write_hex(
+        test_virtual
+    );
+
+    serial_write_string("\n");
+
+    serial_write_string(
+        "EXPECTED PHYSICAL: "
+    );
+
+    serial_write_hex(
+        test_frame
+    );
+
+    serial_write_string("\n");
+
+    serial_write_string(
+        "TRANSLATED PHYSICAL: "
+    );
+
+    serial_write_hex(
+        translated_address
+    );
+
+    serial_write_string("\n");
+
+    if (translate_result == 0 &&
+        translated_address == test_frame)
+    {
+        serial_write_string(
+            "VMM TRANSLATION: OK\n"
+        );
+    }
+    else
+    {
+        serial_write_string(
+            "VMM TRANSLATION: FAILED\n"
+        );
+    }
+
+    /*
+     * Do NOT free test_frame.
+     *
+     * The page-table entry still references this frame.
+     */
+    serial_write_string(
+        "VMM-2A: SOFTWARE WALKER VERIFIED\n"
+    );
+
+    /* --------------------------------------------------------
+       VMM-2B CR3 READ VERIFICATION
+       -------------------------------------------------------- */
+
+    serial_write_string(
+        "\nVMM-2B CR3 VERIFICATION\n"
+    );
+
+    uint64_t current_cr3 =
+        vmm_read_cr3();
+
+    uint64_t current_cr3_pml4 =
+        current_cr3 &
+        0x000FFFFFFFFFF000ULL;
+
+    serial_write_string(
+        "CURRENT CR3: "
+    );
+
+    serial_write_hex(
+        current_cr3
+    );
+
+    serial_write_string("\n");
+
+    serial_write_string(
+        "CURRENT CR3 PML4: "
+    );
+
+    serial_write_hex(
+        current_cr3_pml4
+    );
+
+    serial_write_string("\n");
+
+    serial_write_string(
+        "BATOS PML4: "
+    );
+
+    serial_write_hex(
+        pml4
+    );
+
+    serial_write_string("\n");
+
+    if (current_cr3_pml4 != 0)
+    {
+        serial_write_string(
+            "CR3 READ: OK\n"
+        );
+    }
+    else
+    {
+        serial_write_string(
+            "CR3 READ: FAILED\n"
+        );
+    }
+
+    uint64_t cr3_after_read =
+        vmm_read_cr3();
+
+    uint64_t cr3_after_read_pml4 =
+        cr3_after_read &
+        0x000FFFFFFFFFF000ULL;
+
+    if (cr3_after_read_pml4 == current_cr3_pml4)
+    {
+        serial_write_string(
+            "CR3 UNCHANGED: OK\n"
+        );
+    }
+    else
+    {
+        serial_write_string(
+            "CR3 UNCHANGED: FAILED\n"
+        );
+    }
+
+    serial_write_string(
+        "CR3 WRITE: NOT EXECUTED\n"
+    );
+
+    if (current_cr3_pml4 != 0 &&
+        cr3_after_read_pml4 == current_cr3_pml4)
+    {
+        serial_write_string(
+            "VMM-2B: CR3 READ VERIFIED\n"
+        );
+    }
+    else
+    {
+        serial_write_string(
+            "VMM-2B: CR3 READ FAILED\n"
+        );
+    }
+
+    serial_write_string(
+        "VMM-2B: ADDRESS SPACE NOT ACTIVATED\n"
+    );
+
+    /* --------------------------------------------------------
+       VMM-2C SAFE ADDRESS-SPACE ACTIVATION
+       -------------------------------------------------------- */
+
+    serial_write_string(
+        "\nVMM-2C SAFE ADDRESS-SPACE ACTIVATION\n"
+    );
+
+    /*
+     * Prepare BATOS's PML4 by importing the current
+     * address-space PML4 entries.
+     *
+     * Existing BATOS mappings are preserved.
+     */
+    int prepare_result =
+        vmm_prepare_address_space();
+
+    serial_write_string(
+        "ADDRESS SPACE PREPARE RESULT: "
+    );
+
+    serial_write_hex(
+        (uint64_t)(uint32_t)prepare_result
+    );
+
+    serial_write_string("\n");
+
+    if (prepare_result != 0)
+    {
+        serial_write_string(
+            "VMM-2C PREPARE: FAILED\n"
+        );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    serial_write_string(
+        "VMM-2C PREPARE: OK\n"
+    );
+
+    /*
+     * Verify that BATOS's own VMM-2A mapping survived
+     * the address-space preparation.
+     */
+    uint64_t prepared_physical = 0;
+
+    int prepared_result =
+        vmm_translate(
+            pml4,
+            test_virtual,
+            &prepared_physical
+        );
+
+    serial_write_string(
+        "PREPARED TRANSLATION RESULT: "
+    );
+
+    serial_write_hex(
+        (uint64_t)(uint32_t)prepared_result
+    );
+
+    serial_write_string("\n");
+
+    serial_write_string(
+        "PREPARED PHYSICAL: "
+    );
+
+    serial_write_hex(
+        prepared_physical
+    );
+
+    serial_write_string("\n");
+
+    if (prepared_result != 0 ||
+        prepared_physical != test_frame)
+    {
+        serial_write_string(
+            "BATOS TEST MAPPING: FAILED\n"
+        );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    serial_write_string(
+        "BATOS TEST MAPPING: PRESERVED\n"
+    );
+
+    /*
+     * Disable maskable interrupts before changing CR3.
+     *
+     * Hardware interrupt routing is not active yet.
+     */
+    __asm__ volatile (
+        "cli"
+        :
+        :
+        : "memory"
+    );
+
+    serial_write_string(
+        "INTERRUPTS: DISABLED\n"
+    );
+
+    /*
+     * BATOS-owned PML4 that will become the active
+     * address-space root.
+     */
+    uint64_t batos_pml4 =
+        vmm_get_pml4();
+
+    serial_write_string(
+        "SWITCHING CR3 TO BATOS PML4: "
+    );
+
+    serial_write_hex(
+        batos_pml4
+    );
+
+    serial_write_string("\n");
+
+    /*
+     * ACTUAL CR3 SWITCH.
+     */
+    vmm_write_cr3(
+        batos_pml4
+    );
+
+    /*
+     * Read CR3 back immediately after the switch.
+     */
+    uint64_t activated_cr3 =
+        vmm_read_cr3();
+
+    uint64_t activated_pml4 =
+        activated_cr3 &
+        0x000FFFFFFFFFF000ULL;
+
+    serial_write_string(
+        "CR3 AFTER SWITCH: "
+    );
+
+    serial_write_hex(
+        activated_cr3
+    );
+
+    serial_write_string("\n");
+
+    serial_write_string(
+        "CR3 PML4 AFTER SWITCH: "
+    );
+
+    serial_write_hex(
+        activated_pml4
+    );
+
+    serial_write_string("\n");
+
+    if (activated_pml4 == batos_pml4)
+    {
+        serial_write_string(
+            "CR3 SWITCH: OK\n"
+        );
+
+        serial_write_string(
+            "VMM-2C: ADDRESS SPACE ACTIVATED\n"
+        );
+    }
+    else
+    {
+        serial_write_string(
+            "CR3 SWITCH: FAILED\n"
+        );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    serial_write_string(
+        "BATOS ADDRESS SPACE IS NOW ACTIVE\n"
     );
 
     serial_write_string(
