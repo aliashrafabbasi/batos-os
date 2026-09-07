@@ -1,5 +1,6 @@
 #include <stdint.h>
 #include "limine.h"
+#include "arch/x86_64/gdt.h"
 #include "arch/x86_64/idt.h"
 
 /*
@@ -703,6 +704,11 @@ void kernel_main(void)
         0x00FFFFFF,
         3
     );
+
+    /*
+     * Initialize GDT.
+     */
+    gdt_init();
 
     /*
      * Initialize IDT.
