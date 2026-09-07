@@ -11,7 +11,9 @@ CFLAGS = -Wall -Wextra -O2 \
          -mno-sse2 \
          -mno-mmx \
          -mno-80387 \
-         -mcmodel=kernel
+         -mno-red-zone \
+         -mcmodel=kernel \
+         -I.
 
 LDFLAGS = -T kernel/linker.ld -nostdlib -static
 
