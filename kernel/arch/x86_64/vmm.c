@@ -20,10 +20,18 @@
  */
 
 #define PAGE_TABLE_ENTRIES 512
-
 #define ADDRESS_MASK 0x000FFFFFFFFFF000ULL
 
 static uint64_t kernel_pml4 = 0;
+
+/*
+ * Standalone root returned by the most recent
+ * recursive clone operation.
+ *
+ * Retained for VMM structural verification until
+ * formal page-table ownership and cleanup exist.
+ */
+static uint64_t last_cloned_pml4 = 0;
 
 /*
  * Convert a physical address into a virtual address
@@ -128,6 +136,8 @@ void vmm_init(void)
 {
     kernel_pml4 =
         vmm_create_address_space();
+
+    last_cloned_pml4 = 0;
 }
 
 /*
@@ -352,6 +362,15 @@ uint64_t vmm_get_pml4(void)
 }
 
 /*
+ * Return the standalone root produced by the
+ * most recent recursive clone.
+ */
+uint64_t vmm_get_last_cloned_pml4(void)
+{
+    return last_cloned_pml4;
+}
+
+/*
  * Read the current CPU CR3 register.
  */
 uint64_t vmm_read_cr3(void)
@@ -380,26 +399,128 @@ void vmm_write_cr3(uint64_t pml4_physical)
 }
 
 /*
- * Prepare BATOS's address space for safe activation.
+ * Clone one page-table level recursively.
  *
- * The current CPU address space was initially prepared
- * by Limine.
+ * level:
+ *     3 = PML4
+ *     2 = PDPT
+ *     1 = PD
+ *     0 = PT
  *
- * BATOS already owns a fresh PML4. We copy the current
- * PML4's top-level entries into BATOS's PML4.
+ * For levels above PT, present entries point to
+ * another page-table page and are recursively cloned.
  *
- * Existing BATOS mappings are preserved.
+ * At PT level, entries point directly to physical
+ * data frames and are copied as-is.
  *
- * This is intentionally a shallow clone:
+ * Returns:
+ *     physical address of cloned table
+ *     0 on failure
+ */
+static uint64_t clone_page_table(
+    uint64_t source_physical,
+    int level
+)
+{
+    if (source_physical == 0)
+        return 0;
+
+    if (level < 0 || level > 3)
+        return 0;
+
+    uint64_t destination_physical =
+        allocate_page_table();
+
+    if (destination_physical == 0)
+        return 0;
+
+    uint64_t *source =
+        physical_to_virtual(
+            source_physical
+        );
+
+    uint64_t *destination =
+        physical_to_virtual(
+            destination_physical
+        );
+
+    for (uint64_t i = 0;
+         i < PAGE_TABLE_ENTRIES;
+         i++)
+    {
+        uint64_t entry =
+            source[i];
+
+        if (!(entry & VMM_PRESENT))
+            continue;
+
+        /*
+         * PT entries point directly to physical
+         * frames. Copy them without recursion.
+         */
+        if (level == 0)
+        {
+            destination[i] = entry;
+            continue;
+        }
+
+        /*
+         * Huge pages terminate the hierarchy.
+         *
+         * Preserve them exactly.
+         */
+        if (entry & VMM_HUGE)
+        {
+            destination[i] = entry;
+            continue;
+        }
+
+        /*
+         * Recursively clone the child table.
+         */
+        uint64_t source_child =
+            entry & ADDRESS_MASK;
+
+        uint64_t destination_child =
+            clone_page_table(
+                source_child,
+                level - 1
+            );
+
+        if (destination_child == 0)
+        {
+            /*
+             * Partial rollback is intentionally deferred
+             * until formal VMM ownership management exists.
+             */
+            return 0;
+        }
+
+        /*
+         * Preserve all original entry flags while
+         * replacing only the physical child address.
+         */
+        destination[i] =
+            destination_child |
+            (entry & ~ADDRESS_MASK);
+    }
+
+    return destination_physical;
+}
+
+/*
+ * Prepare BATOS's address space.
  *
- *     current PML4
- *          │
- *          ├── existing lower-level tables
- *          │
- *          └── preserved by BATOS PML4
+ * Current Limine hierarchy
+ *          ↓
+ *   recursive deep clone
+ *          ↓
+ * standalone cloned PML4
+ *          ↓
+ * merge into BATOS-owned PML4
  *
- * A fully BATOS-owned page-table hierarchy will be
- * implemented later.
+ * The standalone cloned root is retained so that the
+ * clone can be structurally verified before activation.
  */
 int vmm_prepare_address_space(void)
 {
@@ -424,21 +545,42 @@ int vmm_prepare_address_space(void)
     if (current_pml4_physical == kernel_pml4)
         return 0;
 
-    uint64_t *current_pml4 =
-        physical_to_virtual(
-            current_pml4_physical
-        );
-
+    /*
+     * BATOS already has its own PML4.
+     */
     uint64_t *batos_pml4 =
         physical_to_virtual(
             kernel_pml4
         );
 
     /*
-     * Import top-level mappings from the current
-     * address space.
+     * Recursively clone the complete active hierarchy.
+     */
+    uint64_t cloned_pml4 =
+        clone_page_table(
+            current_pml4_physical,
+            3
+        );
+
+    if (cloned_pml4 == 0)
+        return -1;
+
+    /*
+     * Retain the standalone clone root for structural
+     * verification.
+     */
+    last_cloned_pml4 =
+        cloned_pml4;
+
+    uint64_t *cloned_pml4_table =
+        physical_to_virtual(
+            cloned_pml4
+        );
+
+    /*
+     * Merge the cloned hierarchy into BATOS's PML4.
      *
-     * Existing BATOS entries are NOT overwritten.
+     * Existing BATOS mappings have priority.
      */
     for (uint64_t i = 0;
          i < PAGE_TABLE_ENTRIES;
@@ -447,16 +589,15 @@ int vmm_prepare_address_space(void)
         if (batos_pml4[i] & VMM_PRESENT)
             continue;
 
-        if (!(current_pml4[i] & VMM_PRESENT))
+        if (!(cloned_pml4_table[i] & VMM_PRESENT))
             continue;
 
         batos_pml4[i] =
-            current_pml4[i];
+            cloned_pml4_table[i];
     }
 
     return 0;
 }
-
 
 /*
  * Inspect one PML4.
@@ -468,8 +609,6 @@ int vmm_prepare_address_space(void)
  *     - page tables
  *     - mappings
  *     - physical memory state
- *
- * It simply counts present PML4 entries.
  */
 int vmm_inspect_address_space(
     uint64_t pml4_physical,
@@ -500,4 +639,391 @@ int vmm_inspect_address_space(
     *present_entries = count;
 
     return 0;
+}
+
+/*
+ * Verify one known virtual-address path through
+ * a recursively cloned hierarchy.
+ *
+ * This verifies:
+ *
+ *     source PML4  != cloned PML4
+ *     source PDPT  != cloned PDPT
+ *     source PD    != cloned PD
+ *     source PT    != cloned PT
+ *
+ * while:
+ *
+ *     source PTE physical frame == cloned PTE frame
+ *     source PTE flags          == cloned PTE flags
+ */
+int vmm_verify_recursive_clone(
+    uint64_t source_pml4_physical,
+    uint64_t cloned_pml4_physical,
+    uint64_t virtual_address
+)
+{
+    if (source_pml4_physical == 0 ||
+        cloned_pml4_physical == 0)
+        return -1;
+
+    if (source_pml4_physical ==
+        cloned_pml4_physical)
+        return -1;
+
+    /*
+     * PML4
+     */
+    uint64_t *source_pml4 =
+        physical_to_virtual(
+            source_pml4_physical
+        );
+
+    uint64_t *cloned_pml4 =
+        physical_to_virtual(
+            cloned_pml4_physical
+        );
+
+    uint64_t index =
+        pml4_index(
+            virtual_address
+        );
+
+    uint64_t source_pml4_entry =
+        source_pml4[index];
+
+    uint64_t cloned_pml4_entry =
+        cloned_pml4[index];
+
+    if (!(source_pml4_entry & VMM_PRESENT))
+        return -1;
+
+    if (!(cloned_pml4_entry & VMM_PRESENT))
+        return -1;
+
+    /*
+     * Huge page at PML4 is not valid for our
+     * current 4-level hierarchy.
+     */
+    if (source_pml4_entry & VMM_HUGE)
+        return -1;
+
+    if (cloned_pml4_entry & VMM_HUGE)
+        return -1;
+
+    /*
+     * PML4 → PDPT
+     */
+    uint64_t source_pdpt_physical =
+        source_pml4_entry & ADDRESS_MASK;
+
+    uint64_t cloned_pdpt_physical =
+        cloned_pml4_entry & ADDRESS_MASK;
+
+    if (source_pdpt_physical == 0 ||
+        cloned_pdpt_physical == 0)
+        return -1;
+
+    if (source_pdpt_physical ==
+        cloned_pdpt_physical)
+        return -1;
+
+    /*
+     * PDPT
+     */
+    uint64_t *source_pdpt =
+        physical_to_virtual(
+            source_pdpt_physical
+        );
+
+    uint64_t *cloned_pdpt =
+        physical_to_virtual(
+            cloned_pdpt_physical
+        );
+
+    index =
+        pdpt_index(
+            virtual_address
+        );
+
+    uint64_t source_pdpt_entry =
+        source_pdpt[index];
+
+    uint64_t cloned_pdpt_entry =
+        cloned_pdpt[index];
+
+    if (!(source_pdpt_entry & VMM_PRESENT) ||
+        !(cloned_pdpt_entry & VMM_PRESENT))
+        return -1;
+
+    if (source_pdpt_entry & VMM_HUGE)
+        return -1;
+
+    if (cloned_pdpt_entry & VMM_HUGE)
+        return -1;
+
+    /*
+     * PDPT → PD
+     */
+    uint64_t source_pd_physical =
+        source_pdpt_entry & ADDRESS_MASK;
+
+    uint64_t cloned_pd_physical =
+        cloned_pdpt_entry & ADDRESS_MASK;
+
+    if (source_pd_physical == 0 ||
+        cloned_pd_physical == 0)
+        return -1;
+
+    if (source_pd_physical ==
+        cloned_pd_physical)
+        return -1;
+
+    /*
+     * PD
+     */
+    uint64_t *source_pd =
+        physical_to_virtual(
+            source_pd_physical
+        );
+
+    uint64_t *cloned_pd =
+        physical_to_virtual(
+            cloned_pd_physical
+        );
+
+    index =
+        pd_index(
+            virtual_address
+        );
+
+    uint64_t source_pd_entry =
+        source_pd[index];
+
+    uint64_t cloned_pd_entry =
+        cloned_pd[index];
+
+    if (!(source_pd_entry & VMM_PRESENT) ||
+        !(cloned_pd_entry & VMM_PRESENT))
+        return -1;
+
+    if (source_pd_entry & VMM_HUGE)
+        return -1;
+
+    if (cloned_pd_entry & VMM_HUGE)
+        return -1;
+
+    /*
+     * PD → PT
+     */
+    uint64_t source_pt_physical =
+        source_pd_entry & ADDRESS_MASK;
+
+    uint64_t cloned_pt_physical =
+        cloned_pd_entry & ADDRESS_MASK;
+
+    if (source_pt_physical == 0 ||
+        cloned_pt_physical == 0)
+        return -1;
+
+    if (source_pt_physical ==
+        cloned_pt_physical)
+        return -1;
+
+    /*
+     * PT
+     */
+    uint64_t *source_pt =
+        physical_to_virtual(
+            source_pt_physical
+        );
+
+    uint64_t *cloned_pt =
+        physical_to_virtual(
+            cloned_pt_physical
+        );
+
+    index =
+        pt_index(
+            virtual_address
+        );
+
+    uint64_t source_pte =
+        source_pt[index];
+
+    uint64_t cloned_pte =
+        cloned_pt[index];
+
+    if (!(source_pte & VMM_PRESENT) ||
+        !(cloned_pte & VMM_PRESENT))
+        return -1;
+
+    /*
+     * The mapped physical frame must be preserved.
+     */
+    if ((source_pte & ADDRESS_MASK) !=
+        (cloned_pte & ADDRESS_MASK))
+        return -1;
+
+    /*
+     * The complete PTE flags must be preserved.
+     */
+    if ((source_pte & ~ADDRESS_MASK) !=
+        (cloned_pte & ~ADDRESS_MASK))
+        return -1;
+
+    return 0;
+}
+
+/*
+ * Recursively verify the complete page-table hierarchy.
+ *
+ * Every present source mapping must be represented
+ * identically in the destination hierarchy.
+ *
+ * Empty source entries must remain empty.
+ *
+ * Page-table pages must be independent.
+ *
+ * Huge-page entries are preserved exactly.
+ */
+static int verify_clone_level(
+    uint64_t source_physical,
+    uint64_t destination_physical,
+    int level
+)
+{
+    if (source_physical == 0 ||
+        destination_physical == 0)
+        return -1;
+
+    if (level < 0 || level > 3)
+        return -1;
+
+    /*
+     * The table pages themselves must be different.
+     */
+    if (source_physical == destination_physical)
+        return -1;
+
+    uint64_t *source =
+        physical_to_virtual(
+            source_physical
+        );
+
+    uint64_t *destination =
+        physical_to_virtual(
+            destination_physical
+        );
+
+    for (uint64_t i = 0;
+         i < PAGE_TABLE_ENTRIES;
+         i++)
+    {
+        uint64_t source_entry =
+            source[i];
+
+        uint64_t destination_entry =
+            destination[i];
+
+        /*
+         * Empty source entries must remain empty.
+         */
+        if (!(source_entry & VMM_PRESENT))
+        {
+            if (destination_entry & VMM_PRESENT)
+                return -1;
+
+            continue;
+        }
+
+        /*
+         * Huge pages terminate the hierarchy and must
+         * be preserved exactly.
+         */
+        if (source_entry & VMM_HUGE)
+        {
+            if (destination_entry != source_entry)
+                return -1;
+
+            continue;
+        }
+
+        /*
+         * Every normal source mapping must exist
+         * in the clone.
+         */
+        if (!(destination_entry & VMM_PRESENT))
+            return -1;
+
+        /*
+         * At PT level, entries are final mappings.
+         */
+        if (level == 0)
+        {
+            if (destination_entry != source_entry)
+                return -1;
+
+            continue;
+        }
+
+        /*
+         * At higher levels, entries point to child
+         * page-table pages.
+         */
+        uint64_t source_child =
+            source_entry & ADDRESS_MASK;
+
+        uint64_t destination_child =
+            destination_entry & ADDRESS_MASK;
+
+        if (source_child == 0 ||
+            destination_child == 0)
+            return -1;
+
+        /*
+         * Child page-table pages must be independent.
+         */
+        if (source_child == destination_child)
+            return -1;
+
+        /*
+         * Recursively verify the child hierarchy.
+         */
+        if (verify_clone_level(
+                source_child,
+                destination_child,
+                level - 1
+            ) != 0)
+        {
+            return -1;
+        }
+    }
+
+    return 0;
+}
+
+/*
+ * VMM-3.1:
+ *
+ * Verify the complete recursive clone.
+ */
+int vmm_verify_clone(
+    uint64_t source_pml4_physical,
+    uint64_t cloned_pml4_physical
+)
+{
+    if (source_pml4_physical == 0 ||
+        cloned_pml4_physical == 0)
+        return -1;
+
+    if (source_pml4_physical ==
+        cloned_pml4_physical)
+        return -1;
+
+    return verify_clone_level(
+        source_pml4_physical,
+        cloned_pml4_physical,
+        3
+    );
 }

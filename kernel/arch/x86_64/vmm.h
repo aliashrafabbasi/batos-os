@@ -73,9 +73,10 @@ void vmm_write_cr3(uint64_t pml4_physical);
 /*
  * Prepare BATOS's address space for safe activation.
  *
- * The current active PML4 is shallow-copied into
- * BATOS's PML4. Existing BATOS-owned entries are
- * preserved.
+ * The currently active Limine hierarchy is recursively
+ * cloned into independently allocated BATOS page tables.
+ *
+ * Existing BATOS-owned mappings are preserved.
  *
  * Returns:
  *      0  = success
@@ -84,7 +85,21 @@ void vmm_write_cr3(uint64_t pml4_physical);
 int vmm_prepare_address_space(void);
 
 /*
- * Inspect BATOS's active address-space structure.
+ * Get the standalone PML4 produced by the most recent
+ * recursive clone operation.
+ *
+ * This root is retained for VMM structural verification.
+ *
+ * Returns:
+ *     Physical address of cloned PML4.
+ *     0 if no clone has been created.
+ */
+uint64_t vmm_get_last_cloned_pml4(void);
+
+/*
+ * Inspect one address-space PML4.
+ *
+ * This function is read-only.
  *
  * Returns:
  *      0  = success
@@ -95,5 +110,44 @@ int vmm_inspect_address_space(
     uint64_t *present_entries
 );
 
+/*
+ * Verify one complete virtual-address path through
+ * two page-table hierarchies.
+ *
+ * The verification checks:
+ *
+ *     PML4 → PDPT → PD → PT → PTE
+ *
+ * and confirms that page-table pages are independently
+ * allocated while the final physical mapping and flags
+ * are preserved.
+ *
+ * Returns:
+ *      0  = verified
+ *     -1  = verification failed
+ */
+int vmm_verify_recursive_clone(
+    uint64_t source_pml4_physical,
+    uint64_t cloned_pml4_physical,
+    uint64_t virtual_address
+);
+
+/*
+ * Verify the complete recursively cloned hierarchy.
+ *
+ * Every present non-huge mapping in the source hierarchy
+ * must exist in the clone.
+ *
+ * Page-table pages must be physically independent.
+ * Leaf PTEs must remain identical.
+ *
+ * Returns:
+ *      0  = recursive clone verified
+ *     -1  = verification failed
+ */
+int vmm_verify_clone(
+    uint64_t source_pml4_physical,
+    uint64_t cloned_pml4_physical
+);
 
 #endif

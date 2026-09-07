@@ -972,6 +972,18 @@ void kernel_main(void)
         serial_write_string(
             "VMM PAGE TABLES: FAILED\n"
         );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
     }
 
     /* --------------------------------------------------------
@@ -1043,6 +1055,18 @@ void kernel_main(void)
         serial_write_string(
             "VMM TRANSLATION: FAILED\n"
         );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
     }
 
     /*
@@ -1148,6 +1172,18 @@ void kernel_main(void)
         serial_write_string(
             "VMM-2B: CR3 READ FAILED\n"
         );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
     }
 
     serial_write_string(
@@ -1155,7 +1191,7 @@ void kernel_main(void)
     );
 
     /* --------------------------------------------------------
-       VMM-2C SAFE ADDRESS-SPACE ACTIVATION
+       VMM-2C SAFE ADDRESS-SPACE PREPARATION
        -------------------------------------------------------- */
 
     serial_write_string(
@@ -1163,10 +1199,19 @@ void kernel_main(void)
     );
 
     /*
-     * Prepare BATOS's PML4 by importing the current
-     * address-space PML4 entries.
+     * Prepare BATOS's PML4.
      *
-     * Existing BATOS mappings are preserved.
+     * vmm_prepare_address_space():
+     *
+     *     1. Recursively clones the currently active
+     *        Limine page-table hierarchy.
+     *
+     *     2. Keeps the cloned hierarchy independent.
+     *
+     *     3. Merges the cloned mappings into BATOS's
+     *        own PML4.
+     *
+     *     4. Preserves existing BATOS-owned mappings.
      */
     int prepare_result =
         vmm_prepare_address_space();
@@ -1203,6 +1248,152 @@ void kernel_main(void)
     serial_write_string(
         "VMM-2C PREPARE: OK\n"
     );
+
+    /* --------------------------------------------------------
+       VMM-3.1 RECURSIVE PAGE-TABLE CLONE VERIFICATION
+       -------------------------------------------------------- */
+
+    serial_write_string(
+        "\nVMM-3.1 RECURSIVE PAGE-TABLE CLONE\n"
+    );
+
+    /*
+     * vmm_prepare_address_space() creates a standalone
+     * recursively cloned PML4 from the currently active
+     * Limine hierarchy.
+     *
+     * The standalone clone root is exposed by:
+     *
+     *     vmm_get_last_cloned_pml4()
+     *
+     * IMPORTANT:
+     *
+     * We verify this standalone clone directly against
+     * the original Limine PML4.
+     *
+     * We do NOT use test_virtual (0x40000000) here because
+     * that mapping belongs to BATOS's own address space and
+     * is not necessarily present in the Limine source tree.
+     */
+    uint64_t cloned_pml4 =
+        vmm_get_last_cloned_pml4();
+
+    serial_write_string(
+        "SOURCE LIMINE PML4: "
+    );
+
+    serial_write_hex(
+        current_cr3_pml4
+    );
+
+    serial_write_string("\n");
+
+    serial_write_string(
+        "CLONED PML4: "
+    );
+
+    serial_write_hex(
+        cloned_pml4
+    );
+
+    serial_write_string("\n");
+
+    if (cloned_pml4 == 0)
+    {
+        serial_write_string(
+            "VMM-3.1 CLONED PML4: INVALID\n"
+        );
+
+        serial_write_string(
+            "VMM-3.1: RECURSIVE CLONE FAILED\n"
+        );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    /*
+     * Full recursive verification.
+     *
+     * This verifies the complete page-table hierarchy:
+     *
+     *     PML4
+     *       ↓
+     *     PDPT
+     *       ↓
+     *     PD
+     *       ↓
+     *     PT
+     *       ↓
+     *     PTE
+     *
+     * For normal 4 KiB mappings, the table pages must be
+     * physically independent while their mapping entries
+     * remain equivalent.
+     */
+    int clone_result =
+        vmm_verify_clone(
+            current_cr3_pml4,
+            cloned_pml4
+        );
+
+    serial_write_string(
+        "FULL CLONE VERIFICATION RESULT: "
+    );
+
+    serial_write_hex(
+        (uint64_t)(uint32_t)clone_result
+    );
+
+    serial_write_string("\n");
+
+    if (clone_result != 0)
+    {
+        serial_write_string(
+            "VMM-3.1: RECURSIVE CLONE FAILED\n"
+        );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    serial_write_string(
+        "VMM-3.1: FULL RECURSIVE CLONE VERIFIED\n"
+    );
+
+    serial_write_string(
+        "VMM-3.1: PAGE-TABLE LEVEL INDEPENDENCE VERIFIED\n"
+    );
+
+    serial_write_string(
+        "VMM-3.1: PHYSICAL MAPPINGS PRESERVED\n"
+    );
+
+    serial_write_string(
+        "VMM-3.1: RECURSIVE CLONE VERIFIED\n"
+    );
+
+    /* --------------------------------------------------------
+       VERIFY BATOS-OWNED MAPPING SURVIVED PREPARATION
+       -------------------------------------------------------- */
 
     /*
      * Verify that BATOS's own VMM-2A mapping survived
@@ -1260,6 +1451,10 @@ void kernel_main(void)
     serial_write_string(
         "BATOS TEST MAPPING: PRESERVED\n"
     );
+
+    /* --------------------------------------------------------
+       ACTIVATE BATOS ADDRESS SPACE
+       -------------------------------------------------------- */
 
     /*
      * Disable maskable interrupts before changing CR3.
@@ -1422,6 +1617,7 @@ void kernel_main(void)
         for (;;)
         {
             __asm__ volatile (
+                "cli\n"
                 "hlt"
             );
         }
@@ -1475,6 +1671,7 @@ void kernel_main(void)
         for (;;)
         {
             __asm__ volatile (
+                "cli\n"
                 "hlt"
             );
         }
