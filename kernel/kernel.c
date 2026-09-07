@@ -4,6 +4,7 @@
 #include "limine.h"
 #include "kernel/arch/x86_64/gdt.h"
 #include "kernel/arch/x86_64/tss.h"
+#include "kernel/arch/x86_64/pmm.h"
 #include "kernel/arch/x86_64/idt.h"
 
 /* ============================================================
@@ -697,7 +698,7 @@ void kernel_main(void)
     );
 
     /* --------------------------------------------------------
-       REAL DOUBLE FAULT TEST
+       PHYSICAL MEMORY MANAGER
        -------------------------------------------------------- */
 
     serial_write_string(
@@ -705,35 +706,145 @@ void kernel_main(void)
     );
 
     serial_write_string(
-        "REAL DOUBLE FAULT TEST\n"
+        "BATOS PMM INITIALIZING...\n"
     );
 
     serial_write_string(
         "================================\n"
     );
 
+    pmm_init();
+
     serial_write_string(
-        "TRIGGERING FIRST PAGE FAULT...\n"
+        "PMM MEMORY MAP: OK\n"
     );
 
-    /*
-       First fault: genuine Page Fault (#PF).
-    */
+    serial_write_string(
+        "HHDM OFFSET: "
+    );
 
-    volatile uint64_t *fault_address =
-        (volatile uint64_t *)0x0000000000000000ULL;
+    serial_write_hex(
+        pmm_get_hhdm_offset()
+    );
 
-    volatile uint64_t fault_value =
-        *fault_address;
-
-    (void)fault_value;
-
-    /*
-       We should never reach here.
-    */
+    serial_write_string("\n");
 
     serial_write_string(
-        "ERROR: FIRST PAGE FAULT DID NOT OCCUR\n"
+        "TOTAL FRAMES: "
+    );
+
+    serial_write_hex(
+        pmm_get_total_frames()
+    );
+
+    serial_write_string("\n");
+
+    serial_write_string(
+        "FREE FRAMES: "
+    );
+
+    serial_write_hex(
+        pmm_get_free_frames()
+    );
+
+    serial_write_string("\n");
+
+    serial_write_string(
+        "USED FRAMES: "
+    );
+
+    serial_write_hex(
+        pmm_get_used_frames()
+    );
+
+    serial_write_string("\n");
+
+    serial_write_string(
+        "PMM BITMAP PHYSICAL: "
+    );
+
+    serial_write_hex(
+        pmm_get_bitmap_physical()
+    );
+
+    serial_write_string("\n");
+
+    serial_write_string(
+        "PMM BITMAP SIZE: "
+    );
+
+    serial_write_hex(
+        pmm_get_bitmap_size()
+    );
+
+    serial_write_string("\n");
+
+    serial_write_string(
+        "PMM READY\n"
+    );
+
+    /* --------------------------------------------------------
+       FRAME ALLOCATOR TEST
+       -------------------------------------------------------- */
+
+    serial_write_string(
+        "\nPMM ALLOCATOR TEST\n"
+    );
+
+    uint64_t frame_a =
+        pmm_alloc_frame();
+
+    uint64_t frame_b =
+        pmm_alloc_frame();
+
+    serial_write_string(
+        "ALLOC FRAME A: "
+    );
+
+    serial_write_hex(frame_a);
+
+    serial_write_string("\n");
+
+    serial_write_string(
+        "ALLOC FRAME B: "
+    );
+
+    serial_write_hex(frame_b);
+
+    serial_write_string("\n");
+
+    serial_write_string(
+        "FREE FRAMES AFTER ALLOC: "
+    );
+
+    serial_write_hex(
+        pmm_get_free_frames()
+    );
+
+    serial_write_string("\n");
+
+    pmm_free_frame(frame_a);
+
+    serial_write_string(
+        "FRAME A FREED\n"
+    );
+
+    serial_write_string(
+        "FREE FRAMES AFTER FREE: "
+    );
+
+    serial_write_hex(
+        pmm_get_free_frames()
+    );
+
+    serial_write_string("\n");
+
+    serial_write_string(
+        "PMM ALLOCATOR: OK\n"
+    );
+
+    serial_write_string(
+        "CPU HALTED\n"
     );
 
     for (;;)

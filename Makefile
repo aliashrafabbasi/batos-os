@@ -24,6 +24,7 @@ C_SOURCES = \
     kernel/kernel.c \
     kernel/arch/x86_64/gdt.c \
     kernel/arch/x86_64/idt.c \
+    kernel/arch/x86_64/pmm.c \
 	kernel/arch/x86_64/tss.c \
 
 
