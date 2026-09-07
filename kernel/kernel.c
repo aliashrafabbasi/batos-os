@@ -5,6 +5,7 @@
 #include "kernel/arch/x86_64/gdt.h"
 #include "kernel/arch/x86_64/tss.h"
 #include "kernel/arch/x86_64/pmm.h"
+#include "kernel/arch/x86_64/vmm.h"
 #include "kernel/arch/x86_64/idt.h"
 
 /* ============================================================
@@ -365,11 +366,6 @@ static void draw_text(
 __attribute__((noreturn))
 void exception_handler(struct exception_frame *frame)
 {
-    /*
-       VECTOR 14 = PAGE FAULT
-       VECTOR 8  = DOUBLE FAULT
-    */
-
     if (frame->vector == 14)
     {
         serial_write_string(
@@ -446,14 +442,6 @@ void exception_handler(struct exception_frame *frame)
             "TRIGGERING NESTED PAGE FAULT...\n"
         );
 
-        /*
-           Deliberately cause another page fault while
-           already inside the first Page Fault handler.
-
-           The CPU should recognize the second fault during
-           exception delivery/handling and raise #DF.
-        */
-
         volatile uint64_t *nested_fault =
             (volatile uint64_t *)0x0000000000000000ULL;
 
@@ -461,10 +449,6 @@ void exception_handler(struct exception_frame *frame)
             *nested_fault;
 
         (void)nested_value;
-
-        /*
-           We should never reach here.
-        */
 
         serial_write_string(
             "ERROR: NESTED PAGE FAULT DID NOT OCCUR\n"
@@ -585,6 +569,10 @@ void kernel_main(void)
     serial_write_string(
         "BATOS KERNEL STARTING...\n"
     );
+
+    /* --------------------------------------------------------
+       FRAMEBUFFER
+       -------------------------------------------------------- */
 
     if (limine_framebuffer_request.response &&
         limine_framebuffer_request.response->framebuffer_count > 0)
@@ -841,6 +829,100 @@ void kernel_main(void)
 
     serial_write_string(
         "PMM ALLOCATOR: OK\n"
+    );
+
+    /* --------------------------------------------------------
+       VIRTUAL MEMORY MANAGER
+       -------------------------------------------------------- */
+
+    serial_write_string(
+        "\n================================\n"
+    );
+
+    serial_write_string(
+        "BATOS VMM INITIALIZING...\n"
+    );
+
+    serial_write_string(
+        "================================\n"
+    );
+
+    vmm_init();
+
+    uint64_t pml4 =
+        vmm_get_pml4();
+
+    serial_write_string(
+        "VMM PML4: "
+    );
+
+    serial_write_hex(
+        pml4
+    );
+
+    serial_write_string("\n");
+
+    uint64_t test_frame =
+        pmm_alloc_frame();
+
+    serial_write_string(
+        "VMM TEST FRAME: "
+    );
+
+    serial_write_hex(
+        test_frame
+    );
+
+    serial_write_string("\n");
+
+    /*
+     * VMM-1 only creates and tests the page-table hierarchy.
+     *
+     * We intentionally do NOT load this PML4 into CR3 yet.
+     */
+
+    uint64_t test_virtual =
+        0x0000000040000000ULL;
+
+    int map_result =
+        vmm_map_page(
+            pml4,
+            test_virtual,
+            test_frame,
+            VMM_WRITABLE
+        );
+
+    serial_write_string(
+        "VMM MAP RESULT: "
+    );
+
+    serial_write_hex(
+        (uint64_t)map_result
+    );
+
+    serial_write_string("\n");
+
+    if (map_result == 0)
+    {
+        serial_write_string(
+            "VMM PAGE TABLES: OK\n"
+        );
+    }
+    else
+    {
+        serial_write_string(
+            "VMM PAGE TABLES: FAILED\n"
+        );
+    }
+
+    /*
+     * The test frame is no longer needed after the
+     * page-table construction test.
+     */
+    pmm_free_frame(test_frame);
+
+    serial_write_string(
+        "VMM INFRASTRUCTURE: OK\n"
     );
 
     serial_write_string(

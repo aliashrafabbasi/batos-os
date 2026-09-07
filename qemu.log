@@ -473,14 +473,16 @@ DR0=0000000000000000 DR1=0000000000000000 DR2=0000000000000000 DR3=0000000000000
 DR6=00000000ffff0ff0 DR7=0000000000000400
 CCS=00000004 CCD=00000001 CCO=EFLAGS
 EFER=0000000000000000
+Servicing hardware INT=0x08
+Servicing hardware INT=0x0e
 Servicing hardware INT=0x0e
 Servicing hardware INT=0x0e
 Servicing hardware INT=0x08
 Servicing hardware INT=0x0e
 Servicing hardware INT=0x0e
+Servicing hardware INT=0x0e
 Servicing hardware INT=0x08
-Servicing hardware INT=0x0e
-Servicing hardware INT=0x0e
+Servicing hardware INT=0x08
 Servicing hardware INT=0x08
 Servicing hardware INT=0x08
 Servicing hardware INT=0x08
