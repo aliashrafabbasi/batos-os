@@ -23,7 +23,9 @@ ISO_DIR = iso_root
 C_SOURCES = \
     kernel/kernel.c \
     kernel/arch/x86_64/gdt.c \
-    kernel/arch/x86_64/idt.c
+    kernel/arch/x86_64/idt.c \
+	kernel/arch/x86_64/tss.c \
+
 
 ASM_SOURCES = \
     kernel/arch/x86_64/interrupts.asm

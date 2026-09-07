@@ -3,15 +3,8 @@
 
 #include <stdint.h>
 
-/*
- * CPU exception frame.
- *
- * Layout is synchronized with
- * interrupts.asm.
- */
 struct exception_frame
 {
-    /* General-purpose registers */
     uint64_t r15;
     uint64_t r14;
     uint64_t r13;
@@ -29,24 +22,19 @@ struct exception_frame
     uint64_t rbx;
     uint64_t rax;
 
-    /* Exception information */
     uint64_t vector;
     uint64_t error_code;
 
-    /* CPU-pushed interrupt frame */
     uint64_t rip;
     uint64_t cs;
     uint64_t rflags;
 };
 
-/*
- * Initialize the Interrupt Descriptor Table.
- */
 void idt_init(void);
 
-/*
- * Exception entry points.
- */
+uint8_t idt_get_ist(uint8_t vector);
+uint16_t idt_get_selector(uint8_t vector);
+
 extern void exception_stub_0(void);
 extern void exception_stub_1(void);
 extern void exception_stub_2(void);
@@ -80,9 +68,6 @@ extern void exception_stub_29(void);
 extern void exception_stub_30(void);
 extern void exception_stub_31(void);
 
-/*
- * Common C exception handler.
- */
 __attribute__((noreturn))
 void exception_handler(struct exception_frame *frame);
 

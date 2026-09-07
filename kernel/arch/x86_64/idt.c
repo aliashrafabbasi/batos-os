@@ -1,4 +1,5 @@
 #include "idt.h"
+#include "tss.h"
 
 struct idt_entry
 {
@@ -22,9 +23,8 @@ static struct idt_entry idt[256]
 
 static struct idt_ptr idt_descriptor;
 
-
 /*
- * Read the current code segment selector.
+ * Read current code segment selector.
  */
 static uint16_t get_cs(void)
 {
@@ -38,9 +38,11 @@ static uint16_t get_cs(void)
     return cs;
 }
 
-
 /*
  * Install one IDT gate.
+ *
+ * Double Fault (#DF), vector 8,
+ * uses IST1 from the TSS.
  */
 static void idt_set_gate(
     uint8_t vector,
@@ -53,13 +55,15 @@ static void idt_set_gate(
     idt[vector].selector =
         get_cs();
 
-    idt[vector].ist = 0;
-
     /*
-     * Present
-     * Interrupt Gate
-     * DPL 0
+     * IST index:
+     *
+     * 0 = normal stack
+     * 1 = TSS.IST1
      */
+    idt[vector].ist =
+        (vector == 8) ? 1 : 0;
+
     idt[vector].type_attr = 0x8E;
 
     idt[vector].offset_mid =
@@ -71,38 +75,27 @@ static void idt_set_gate(
     idt[vector].zero = 0;
 }
 
-
 /*
- * Initialize the Interrupt Descriptor Table.
+ * Initialize IDT.
  */
 void idt_init(void)
 {
-    /*
-     * Disable interrupts while
-     * constructing the IDT.
-     */
     __asm__ volatile (
         "cli"
         ::: "memory"
     );
 
-
     /*
-     * Clear all 256 IDT entries.
+     * Clear all 256 entries.
      */
     for (int i = 0; i < 256; i++)
     {
         idt[i] = (struct idt_entry){0};
     }
 
-
     /*
-     * Install CPU exception handlers.
-     *
-     * Vectors 0-31 are reserved for
-     * architectural CPU exceptions.
+     * CPU exception handlers.
      */
-
     idt_set_gate(0,  (uint64_t)exception_stub_0);
     idt_set_gate(1,  (uint64_t)exception_stub_1);
     idt_set_gate(2,  (uint64_t)exception_stub_2);
@@ -136,16 +129,14 @@ void idt_init(void)
     idt_set_gate(30, (uint64_t)exception_stub_30);
     idt_set_gate(31, (uint64_t)exception_stub_31);
 
-
     /*
-     * Build the IDTR descriptor.
+     * Build IDTR.
      */
     idt_descriptor.limit =
         sizeof(idt) - 1;
 
     idt_descriptor.base =
         (uint64_t)&idt[0];
-
 
     /*
      * Load IDTR.
@@ -156,4 +147,20 @@ void idt_init(void)
         : "r"(&idt_descriptor)
         : "memory"
     );
+}
+
+/*
+ * Return IST field of an IDT gate.
+ */
+uint8_t idt_get_ist(uint8_t vector)
+{
+    return idt[vector].ist;
+}
+
+/*
+ * Return selector field of an IDT gate.
+ */
+uint16_t idt_get_selector(uint8_t vector)
+{
+    return idt[vector].selector;
 }

@@ -1,53 +1,57 @@
 #include "gdt.h"
+#include "tss.h"
 
 /*
- * Global Descriptor Table entry.
- *
- * Long mode does not use the base/limit for normal
- * code/data addressing, but the descriptors are still
- * required for the CPU's segment state.
+ * Standard GDT entry.
  */
 struct gdt_entry
 {
     uint16_t limit_low;
     uint16_t base_low;
-
-    uint8_t base_middle;
-
-    uint8_t access;
-
-    uint8_t granularity;
-
-    uint8_t base_high;
+    uint8_t  base_middle;
+    uint8_t  access;
+    uint8_t  granularity;
+    uint8_t  base_high;
 } __attribute__((packed));
 
-
 /*
- * GDTR format used by LGDT.
+ * 64-bit TSS descriptor.
+ *
+ * A TSS descriptor occupies 16 bytes in the GDT.
  */
+struct gdt_tss_entry
+{
+    uint16_t limit_low;
+    uint16_t base_low;
+    uint8_t  base_middle;
+    uint8_t  access;
+    uint8_t  granularity;
+    uint8_t  base_high;
+    uint32_t base_upper;
+    uint32_t reserved;
+} __attribute__((packed));
+
 struct gdt_ptr
 {
     uint16_t limit;
     uint64_t base;
 } __attribute__((packed));
 
-
 /*
- * BATOS Global Descriptor Table.
+ * GDT:
  *
- * Entry 0: Null
- * Entry 1: Kernel Code
- * Entry 2: Kernel Data
+ * Entry 0 = Null
+ * Entry 1 = Kernel Code
+ * Entry 2 = Kernel Data
+ * Entry 3-4 = 64-bit TSS descriptor
  */
-static struct gdt_entry gdt[3]
-    __attribute__((aligned(16)));
+static uint8_t gdt[
+    sizeof(struct gdt_entry) * 3 +
+    sizeof(struct gdt_tss_entry)
+] __attribute__((aligned(16)));
 
 static struct gdt_ptr gdt_descriptor;
 
-
-/*
- * Set one GDT entry.
- */
 static void gdt_set_entry(
     int index,
     uint32_t base,
@@ -56,30 +60,64 @@ static void gdt_set_entry(
     uint8_t granularity
 )
 {
-    gdt[index].limit_low =
+    struct gdt_entry *entry =
+        (struct gdt_entry *)&gdt[index * 8];
+
+    entry->limit_low =
         (uint16_t)(limit & 0xFFFF);
 
-    gdt[index].base_low =
+    entry->base_low =
         (uint16_t)(base & 0xFFFF);
 
-    gdt[index].base_middle =
+    entry->base_middle =
         (uint8_t)((base >> 16) & 0xFF);
 
-    gdt[index].access =
-        access;
+    entry->access = access;
 
-    gdt[index].granularity =
+    entry->granularity =
         (uint8_t)(((limit >> 16) & 0x0F) |
                   (granularity & 0xF0));
 
-    gdt[index].base_high =
+    entry->base_high =
         (uint8_t)((base >> 24) & 0xFF);
 }
 
+static void gdt_set_tss(
+    uint64_t base,
+    uint32_t limit
+)
+{
+    struct gdt_tss_entry *entry =
+        (struct gdt_tss_entry *)&gdt[24];
 
-/*
- * Load the GDT and reload the segment registers.
- */
+    entry->limit_low =
+        (uint16_t)(limit & 0xFFFF);
+
+    entry->base_low =
+        (uint16_t)(base & 0xFFFF);
+
+    entry->base_middle =
+        (uint8_t)((base >> 16) & 0xFF);
+
+    /*
+     * Present + Ring 0 + Available 64-bit TSS.
+     *
+     * Type = 1001b
+     */
+    entry->access = 0x89;
+
+    entry->granularity =
+        (uint8_t)((limit >> 16) & 0x0F);
+
+    entry->base_high =
+        (uint8_t)((base >> 24) & 0xFF);
+
+    entry->base_upper =
+        (uint32_t)((base >> 32) & 0xFFFFFFFF);
+
+    entry->reserved = 0;
+}
+
 static void gdt_load(void)
 {
     /*
@@ -93,9 +131,7 @@ static void gdt_load(void)
     );
 
     /*
-     * Reload CS using a far return.
-     *
-     * We cannot simply mov a value into CS.
+     * Reload CS with kernel code selector.
      */
     __asm__ volatile (
         "pushq $0x08\n"
@@ -109,7 +145,7 @@ static void gdt_load(void)
     );
 
     /*
-     * Reload the data segment registers.
+     * Reload kernel data segments.
      */
     __asm__ volatile (
         "movw $0x10, %%ax\n"
@@ -123,35 +159,33 @@ static void gdt_load(void)
         :
         : "rax", "memory"
     );
-}
 
-
-/*
- * Initialize the BATOS Global Descriptor Table.
- */
-void gdt_init(void)
-{
     /*
-     * Disable interrupts while changing
-     * the processor's descriptor state.
+     * Load Task Register with TSS selector.
      */
     __asm__ volatile (
-        "cli"
-        ::: "memory"
+        "movw $0x18, %%ax\n"
+        "ltr %%ax\n"
+        :
+        :
+        : "rax", "memory"
     );
+}
+
+void gdt_init(void)
+{
+    __asm__ volatile ("cli" ::: "memory");
 
     /*
-     * Clear the table.
+     * Clear complete GDT.
      */
-    for (int i = 0; i < 3; i++)
+    for (unsigned int i = 0; i < sizeof(gdt); i++)
     {
-        gdt[i] = (struct gdt_entry){0};
+        gdt[i] = 0;
     }
 
     /*
      * Null descriptor.
-     *
-     * Required by the x86 architecture.
      */
     gdt_set_entry(
         0,
@@ -162,20 +196,7 @@ void gdt_init(void)
     );
 
     /*
-     * Kernel Code Segment.
-     *
-     * Access:
-     *   0x9A
-     *
-     *   Present = 1
-     *   DPL     = 0
-     *   Code    = 1
-     *   Readable= 1
-     *
-     * Granularity:
-     *   0x20
-     *
-     *   Long mode = 1
+     * Kernel code.
      */
     gdt_set_entry(
         1,
@@ -186,18 +207,7 @@ void gdt_init(void)
     );
 
     /*
-     * Kernel Data Segment.
-     *
-     * Access:
-     *   0x92
-     *
-     *   Present = 1
-     *   DPL     = 0
-     *   Data     = 1
-     *   Writable = 1
-     *
-     * In 64-bit mode the base and limit are
-     * largely ignored for normal data addressing.
+     * Kernel data.
      */
     gdt_set_entry(
         2,
@@ -205,6 +215,19 @@ void gdt_init(void)
         0,
         0x92,
         0x00
+    );
+
+    /*
+     * Initialize TSS.
+     */
+    tss_init();
+
+    /*
+     * Install TSS descriptor.
+     */
+    gdt_set_tss(
+        tss_get_base(),
+        tss_get_limit()
     );
 
     /*
@@ -217,7 +240,7 @@ void gdt_init(void)
         (uint64_t)&gdt[0];
 
     /*
-     * Load the new GDT.
+     * Load GDT and TSS.
      */
     gdt_load();
 }
