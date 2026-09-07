@@ -322,6 +322,25 @@ static void serial_write_hex(uint64_t value)
 
 
 /*
+ * Read CR2.
+ *
+ * CR2 contains the virtual address that
+ * caused the page fault.
+ */
+static uint64_t read_cr2(void)
+{
+    uint64_t value;
+
+    __asm__ volatile (
+        "mov %%cr2, %0"
+        : "=r"(value)
+    );
+
+    return value;
+}
+
+
+/*
  * Kernel exception handler.
  */
 __attribute__((noreturn))
@@ -329,6 +348,11 @@ void exception_handler(struct exception_frame *frame)
 {
     const char *name = "UNKNOWN EXCEPTION";
 
+    uint64_t page_fault_address = 0;
+
+    /*
+     * Exception names.
+     */
     switch (frame->vector)
     {
         case 0:
@@ -389,6 +413,7 @@ void exception_handler(struct exception_frame *frame)
 
         case 14:
             name = "PAGE FAULT (#PF)";
+            page_fault_address = read_cr2();
             break;
 
         case 15:
@@ -467,6 +492,19 @@ void exception_handler(struct exception_frame *frame)
 
 
     /*
+     * Page Fault specific information.
+     */
+    if (frame->vector == 14)
+    {
+        serial_write_string(
+            "\nPAGE FAULT ADDRESS: "
+        );
+
+        serial_write_hex(page_fault_address);
+    }
+
+
+    /*
      * General purpose registers.
      */
     serial_write_string("\n\nREGISTERS:\n");
@@ -531,6 +569,20 @@ void exception_handler(struct exception_frame *frame)
     serial_write_string("\nRFLAGS: ");
     serial_write_hex(frame->rflags);
 
+
+    /*
+     * Page Fault diagnostic.
+     */
+    if (frame->vector == 14)
+    {
+        serial_write_string(
+            "\nCR2:    "
+        );
+
+        serial_write_hex(page_fault_address);
+    }
+
+
     serial_write_string(
         "\n\n"
         "C HANDLER: OK\n"
@@ -552,13 +604,26 @@ void exception_handler(struct exception_frame *frame)
         4
     );
 
-    draw_text(
-        "CPU EXCEPTION",
-        40,
-        100,
-        0x00FFFFFF,
-        3
-    );
+    if (frame->vector == 14)
+    {
+        draw_text(
+            "PAGE FAULT",
+            40,
+            100,
+            0x00FFFFFF,
+            3
+        );
+    }
+    else
+    {
+        draw_text(
+            "CPU EXCEPTION",
+            40,
+            100,
+            0x00FFFFFF,
+            3
+        );
+    }
 
     draw_text(
         "CPU HALTED",
@@ -658,28 +723,31 @@ void kernel_main(void)
 
     /*
      * ==========================================
-     * TEMPORARY EXCEPTION TEST
+     * TEMPORARY PAGE FAULT TEST
      * ==========================================
      *
-     * This intentionally triggers:
+     * Accessing an unmapped virtual address
+     * should generate:
      *
-     *     Divide Error (#DE)
+     *     Page Fault (#PF)
      *
      * CPU -> IDT -> Assembly Stub
      *     -> Register Frame -> C Handler
+     *
+     * CR2 should contain the faulting address.
      */
-    volatile uint64_t a = 10;
-    volatile uint64_t b = 0;
+    volatile uint64_t *invalid_address =
+        (uint64_t *)0xDEADBEEF;
 
-    volatile uint64_t result =
-        a / b;
+    volatile uint64_t test =
+        *invalid_address;
 
-    (void)result;
+    (void)test;
 
 
     /*
      * Should never reach here because
-     * the divide error is fatal.
+     * the page fault is fatal.
      */
     for (;;)
     {
