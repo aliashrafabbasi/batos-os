@@ -456,3 +456,48 @@ int vmm_prepare_address_space(void)
 
     return 0;
 }
+
+
+/*
+ * Inspect one PML4.
+ *
+ * This function is read-only.
+ *
+ * It does not modify:
+ *     - CR3
+ *     - page tables
+ *     - mappings
+ *     - physical memory state
+ *
+ * It simply counts present PML4 entries.
+ */
+int vmm_inspect_address_space(
+    uint64_t pml4_physical,
+    uint64_t *present_entries
+)
+{
+    if (pml4_physical == 0)
+        return -1;
+
+    if (present_entries == NULL)
+        return -1;
+
+    uint64_t *pml4 =
+        physical_to_virtual(
+            pml4_physical
+        );
+
+    uint64_t count = 0;
+
+    for (uint64_t i = 0;
+         i < PAGE_TABLE_ENTRIES;
+         i++)
+    {
+        if (pml4[i] & VMM_PRESENT)
+            count++;
+    }
+
+    *present_entries = count;
+
+    return 0;
+}

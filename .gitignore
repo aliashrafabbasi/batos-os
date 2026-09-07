@@ -1,0 +1,12 @@
+# Build outputs
+build/
+
+# Compiled object files
+*.o
+
+# Generated kernel binaries
+*.elf
+*.iso
+
+# Temporary QEMU/debug files
+qemu.log

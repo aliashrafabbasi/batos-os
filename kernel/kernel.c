@@ -1364,6 +1364,263 @@ void kernel_main(void)
         "BATOS ADDRESS SPACE IS NOW ACTIVE\n"
     );
 
+    /* --------------------------------------------------------
+       VMM-2D ADDRESS-SPACE INSPECTION
+       -------------------------------------------------------- */
+
+    serial_write_string(
+        "\nVMM-2D ADDRESS-SPACE INSPECTION\n"
+    );
+
+    uint64_t active_cr3 =
+        vmm_read_cr3();
+
+    uint64_t active_pml4 =
+        active_cr3 &
+        0x000FFFFFFFFFF000ULL;
+
+    serial_write_string(
+        "ACTIVE CR3: "
+    );
+
+    serial_write_hex(
+        active_cr3
+    );
+
+    serial_write_string("\n");
+
+    serial_write_string(
+        "ACTIVE PML4: "
+    );
+
+    serial_write_hex(
+        active_pml4
+    );
+
+    serial_write_string("\n");
+
+    serial_write_string(
+        "BATOS PML4: "
+    );
+
+    serial_write_hex(
+        pml4
+    );
+
+    serial_write_string("\n");
+
+    if (active_pml4 != pml4)
+    {
+        serial_write_string(
+            "VMM-2D ACTIVE PML4: FAILED\n"
+        );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "hlt"
+            );
+        }
+    }
+
+    uint64_t present_entries = 0;
+
+    int inspect_result =
+        vmm_inspect_address_space(
+            active_pml4,
+            &present_entries
+        );
+
+    serial_write_string(
+        "INSPECTION RESULT: "
+    );
+
+    serial_write_hex(
+        (uint64_t)(uint32_t)inspect_result
+    );
+
+    serial_write_string("\n");
+
+    serial_write_string(
+        "ACTIVE PML4 PRESENT ENTRIES: "
+    );
+
+    serial_write_hex(
+        present_entries
+    );
+
+    serial_write_string("\n");
+
+    if (inspect_result == 0 &&
+        present_entries > 0)
+    {
+        serial_write_string(
+            "VMM-2D ADDRESS SPACE: OK\n"
+        );
+    }
+    else
+    {
+        serial_write_string(
+            "VMM-2D ADDRESS SPACE: FAILED\n"
+        );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "hlt"
+            );
+        }
+    }
+
+    /* --------------------------------------------------------
+       VMM-2E HARDWARE PAGE TRANSLATION TEST
+       -------------------------------------------------------- */
+
+    serial_write_string(
+        "\nVMM-2E HARDWARE PAGE TRANSLATION TEST\n"
+    );
+
+    /*
+     * At this point:
+     *
+     *     CR3
+     *       ↓
+     *     BATOS PML4
+     *       ↓
+     *     PDPT
+     *       ↓
+     *     PD
+     *       ↓
+     *     PT
+     *       ↓
+     *     PTE
+     *       ↓
+     *     test_frame
+     *
+     * The software walker already verified this mapping.
+     *
+     * VMM-2E performs a REAL memory access through
+     * test_virtual.
+     *
+     * This forces the CPU/MMU to perform the hardware
+     * page-table translation.
+     */
+
+    volatile uint64_t *hardware_test_address =
+        (volatile uint64_t *)test_virtual;
+
+    uint64_t test_pattern =
+        0x4241544F532D3245ULL;
+
+    serial_write_string(
+        "HARDWARE TEST VIRTUAL: "
+    );
+
+    serial_write_hex(
+        (uint64_t)hardware_test_address
+    );
+
+    serial_write_string("\n");
+
+    serial_write_string(
+        "HARDWARE TEST PHYSICAL: "
+    );
+
+    serial_write_hex(
+        test_frame
+    );
+
+    serial_write_string("\n");
+
+    serial_write_string(
+        "WRITING TEST PATTERN...\n"
+    );
+
+    /*
+     * REAL CPU MEMORY ACCESS.
+     *
+     * Because the pointer is volatile, the compiler must
+     * emit an actual memory store.
+     */
+    *hardware_test_address =
+        test_pattern;
+
+    serial_write_string(
+        "READING TEST PATTERN...\n"
+    );
+
+    /*
+     * REAL CPU MEMORY ACCESS.
+     *
+     * This load must travel through the active BATOS
+     * page-table hierarchy.
+     */
+    uint64_t readback =
+        *hardware_test_address;
+
+    serial_write_string(
+        "EXPECTED VALUE: "
+    );
+
+    serial_write_hex(
+        test_pattern
+    );
+
+    serial_write_string("\n");
+
+    serial_write_string(
+        "READBACK VALUE: "
+    );
+
+    serial_write_hex(
+        readback
+    );
+
+    serial_write_string("\n");
+
+    if (readback != test_pattern)
+    {
+        serial_write_string(
+            "VMM-2E: HARDWARE TRANSLATION FAILED\n"
+        );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    serial_write_string(
+        "HARDWARE MEMORY ACCESS: OK\n"
+    );
+
+    serial_write_string(
+        "VMM-2E: CPU PAGE TRANSLATION VERIFIED\n"
+    );
+
+    serial_write_string(
+        "BATOS HARDWARE ADDRESS TRANSLATION: OK\n"
+    );
+
+    /* --------------------------------------------------------
+       FINAL HALT
+       -------------------------------------------------------- */
+
     serial_write_string(
         "CPU HALTED\n"
     );

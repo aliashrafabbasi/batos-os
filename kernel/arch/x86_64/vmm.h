@@ -83,4 +83,17 @@ void vmm_write_cr3(uint64_t pml4_physical);
  */
 int vmm_prepare_address_space(void);
 
+/*
+ * Inspect BATOS's active address-space structure.
+ *
+ * Returns:
+ *      0  = success
+ *     -1  = failure
+ */
+int vmm_inspect_address_space(
+    uint64_t pml4_physical,
+    uint64_t *present_entries
+);
+
+
 #endif
