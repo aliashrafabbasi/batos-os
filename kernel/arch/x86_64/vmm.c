@@ -22,6 +22,59 @@
 #define PAGE_TABLE_ENTRIES 512
 #define ADDRESS_MASK 0x000FFFFFFFFFF000ULL
 
+/*
+ * x86 hardware-managed page-table bits.
+ *
+ * The CPU may update these bits while an address space
+ * is actively being used:
+ *
+ *     bit 5 = Accessed
+ *     bit 6 = Dirty
+ *
+ * Recursive-clone verification must not treat hardware
+ * updates to these bits as a clone failure.
+ */
+#define VMM_HARDWARE_MANAGED_BITS \
+    ((1ULL << 5) | (1ULL << 6))
+
+/*
+ * VMM-3.2A:
+ *
+ * Track only page-table frames created by the VMM.
+ *
+ * We intentionally do NOT create per-physical-frame metadata
+ * inside the PMM. The PMM remains responsible for physical
+ * frame availability, while the VMM owns page-table lifecycle
+ * metadata.
+ *
+ * This registry is deliberately bounded for the current
+ * kernel-development stage. It can be replaced by a dynamically
+ * managed structure when the kernel gains a general-purpose
+ * allocator.
+ */
+#define VMM_MAX_PAGE_TABLES 4096
+
+enum vmm_page_table_level
+{
+    VMM_LEVEL_PT = 0,
+    VMM_LEVEL_PD = 1,
+    VMM_LEVEL_PDPT = 2,
+    VMM_LEVEL_PML4 = 3
+};
+
+struct vmm_page_table_record
+{
+    uint64_t physical_address;
+    uint64_t owner_pml4;
+    uint8_t level;
+    uint8_t in_use;
+};
+
+static struct vmm_page_table_record
+    page_table_records[VMM_MAX_PAGE_TABLES];
+
+static uint64_t page_table_record_count = 0;
+
 static uint64_t kernel_pml4 = 0;
 
 /*
@@ -32,6 +85,36 @@ static uint64_t kernel_pml4 = 0;
  * formal page-table ownership and cleanup exist.
  */
 static uint64_t last_cloned_pml4 = 0;
+
+/*
+ * VMM-3.2B:
+ *
+ * Track the lifecycle of address-space roots.
+ *
+ * VMM owns the address-space lifecycle while PMM owns
+ * physical-frame availability.
+ *
+ * A newly created address space starts in CREATED state.
+ * Only a registered address space may become ACTIVE.
+ */
+#define VMM_MAX_ADDRESS_SPACES 256
+
+struct vmm_address_space_record
+{
+    uint64_t pml4_physical;
+    uint8_t state;
+    uint8_t in_use;
+};
+
+static struct vmm_address_space_record
+    address_space_records[VMM_MAX_ADDRESS_SPACES];
+
+static uint64_t address_space_record_count = 0;
+
+/*
+ * Physical PML4 currently known to be ACTIVE.
+ */
+static uint64_t active_address_space_pml4 = 0;
 
 /*
  * Convert a physical address into a virtual address
@@ -59,9 +142,52 @@ static void zero_page(uint64_t physical)
 }
 
 /*
- * Allocate and initialize one page-table page.
+ * Register one VMM-owned page-table frame.
  */
-static uint64_t allocate_page_table(void)
+static int register_page_table(
+    uint64_t physical_address,
+    int level,
+    uint64_t owner_pml4
+)
+{
+    if (physical_address == 0)
+        return -1;
+
+    if (level < VMM_LEVEL_PT ||
+        level > VMM_LEVEL_PML4)
+        return -1;
+
+    if (page_table_record_count >= VMM_MAX_PAGE_TABLES)
+        return -1;
+
+    struct vmm_page_table_record *record =
+        &page_table_records[page_table_record_count];
+
+    record->physical_address = physical_address;
+    record->owner_pml4 = owner_pml4;
+    record->level = (uint8_t)level;
+    record->in_use = 1;
+
+    page_table_record_count++;
+
+    return 0;
+}
+
+/*
+ * Allocate and initialize one page-table page.
+ *
+ * The caller specifies:
+ *
+ *     level      = PML4 / PDPT / PD / PT
+ *     owner_pml4 = address-space root
+ *
+ * VMM-3.2A establishes explicit VMM ownership metadata
+ * for every page-table frame created by the VMM.
+ */
+static uint64_t allocate_page_table(
+    int level,
+    uint64_t owner_pml4
+)
 {
     uint64_t physical =
         pmm_alloc_frame();
@@ -71,7 +197,53 @@ static uint64_t allocate_page_table(void)
 
     zero_page(physical);
 
+    /*
+     * A PML4 is the root owner of its address space.
+     */
+    if (level == VMM_LEVEL_PML4 &&
+        owner_pml4 == 0)
+    {
+        owner_pml4 = physical;
+    }
+
+    if (register_page_table(
+            physical,
+            level,
+            owner_pml4
+        ) != 0)
+    {
+        pmm_free_frame(physical);
+        return 0;
+    }
+
     return physical;
+}
+
+/*
+ * Find the ownership record for a page-table frame.
+ */
+static struct vmm_page_table_record *
+find_page_table_record(uint64_t physical_address)
+{
+    if (physical_address == 0)
+        return NULL;
+
+    for (uint64_t i = 0;
+         i < page_table_record_count;
+         i++)
+    {
+        struct vmm_page_table_record *record =
+            &page_table_records[i];
+
+        if (record->in_use &&
+            record->physical_address ==
+                physical_address)
+        {
+            return record;
+        }
+    }
+
+    return NULL;
 }
 
 /*
@@ -80,7 +252,9 @@ static uint64_t allocate_page_table(void)
 static uint64_t get_or_create_table(
     uint64_t *parent,
     uint64_t index,
-    uint64_t flags
+    uint64_t flags,
+    int child_level,
+    uint64_t owner_pml4
 )
 {
     uint64_t entry =
@@ -92,7 +266,10 @@ static uint64_t get_or_create_table(
     }
 
     uint64_t child =
-        allocate_page_table();
+        allocate_page_table(
+            child_level,
+            owner_pml4
+        );
 
     if (child == 0)
         return 0;
@@ -130,6 +307,222 @@ static uint64_t pt_index(uint64_t virtual_address)
 }
 
 /*
+ * Verify one VMM page-table ownership record.
+ */
+static int verify_page_table_record(
+    uint64_t physical_address,
+    int expected_level,
+    uint64_t expected_owner_pml4
+)
+{
+    struct vmm_page_table_record *record =
+        find_page_table_record(
+            physical_address
+        );
+
+    if (record == NULL)
+        return -1;
+
+    if (!record->in_use)
+        return -1;
+
+    if (record->level != expected_level)
+        return -1;
+
+    if (record->owner_pml4 != expected_owner_pml4)
+        return -1;
+
+    return 0;
+}
+
+/*
+ * Verify that a PML4 owns itself.
+ */
+int vmm_verify_page_table_root(
+    uint64_t pml4_physical
+)
+{
+    if (pml4_physical == 0)
+        return -1;
+
+    return verify_page_table_record(
+        pml4_physical,
+        VMM_LEVEL_PML4,
+        pml4_physical
+    );
+}
+
+/*
+ * Verify ownership of the complete page-table path:
+ *
+ *     PML4 -> PDPT -> PD -> PT
+ */
+int vmm_verify_page_table_ownership(
+    uint64_t pml4_physical,
+    uint64_t virtual_address
+)
+{
+    if (pml4_physical == 0)
+        return -1;
+
+    /*
+     * Verify root ownership first.
+     */
+    if (verify_page_table_record(
+            pml4_physical,
+            VMM_LEVEL_PML4,
+            pml4_physical
+        ) != 0)
+    {
+        return -1;
+    }
+
+    uint64_t *pml4 =
+        physical_to_virtual(
+            pml4_physical
+        );
+
+    uint64_t pml4_entry =
+        pml4[pml4_index(virtual_address)];
+
+    if (!(pml4_entry & VMM_PRESENT))
+        return -1;
+
+    uint64_t pdpt_physical =
+        pml4_entry & ADDRESS_MASK;
+
+    if (verify_page_table_record(
+            pdpt_physical,
+            VMM_LEVEL_PDPT,
+            pml4_physical
+        ) != 0)
+    {
+        return -1;
+    }
+
+    uint64_t *pdpt =
+        physical_to_virtual(
+            pdpt_physical
+        );
+
+    uint64_t pdpt_entry =
+        pdpt[pdpt_index(virtual_address)];
+
+    if (!(pdpt_entry & VMM_PRESENT))
+        return -1;
+
+    if (pdpt_entry & VMM_HUGE)
+        return -1;
+
+    uint64_t pd_physical =
+        pdpt_entry & ADDRESS_MASK;
+
+    if (verify_page_table_record(
+            pd_physical,
+            VMM_LEVEL_PD,
+            pml4_physical
+        ) != 0)
+    {
+        return -1;
+    }
+
+    uint64_t *pd =
+        physical_to_virtual(
+            pd_physical
+        );
+
+    uint64_t pd_entry =
+        pd[pd_index(virtual_address)];
+
+    if (!(pd_entry & VMM_PRESENT))
+        return -1;
+
+    if (pd_entry & VMM_HUGE)
+        return -1;
+
+    uint64_t pt_physical =
+        pd_entry & ADDRESS_MASK;
+
+    if (verify_page_table_record(
+            pt_physical,
+            VMM_LEVEL_PT,
+            pml4_physical
+        ) != 0)
+    {
+        return -1;
+    }
+
+    return 0;
+}
+
+/*
+ * Find a registered address-space record.
+ */
+static struct vmm_address_space_record *
+find_address_space_record(uint64_t pml4_physical)
+{
+    if (pml4_physical == 0)
+        return NULL;
+
+    for (uint64_t i = 0;
+         i < address_space_record_count;
+         i++)
+    {
+        struct vmm_address_space_record *record =
+            &address_space_records[i];
+
+        if (record->in_use &&
+            record->pml4_physical ==
+                pml4_physical)
+        {
+            return record;
+        }
+    }
+
+    return NULL;
+}
+
+/*
+ * Register one newly created address space.
+ */
+static int register_address_space(
+    uint64_t pml4_physical
+)
+{
+    if (pml4_physical == 0)
+        return -1;
+
+    if (address_space_record_count >=
+        VMM_MAX_ADDRESS_SPACES)
+    {
+        return -1;
+    }
+
+    if (find_address_space_record(
+            pml4_physical) != NULL)
+    {
+        return -1;
+    }
+
+    struct vmm_address_space_record *record =
+        &address_space_records[
+            address_space_record_count
+        ];
+
+    record->pml4_physical =
+        pml4_physical;
+
+    record->state =
+        VMM_ADDRESS_SPACE_CREATED;
+
+    record->in_use = 1;
+
+    address_space_record_count++;
+
+    return 0;
+}
+
+/*
  * Initialize BATOS Virtual Memory Manager.
  */
 void vmm_init(void)
@@ -147,7 +540,191 @@ void vmm_init(void)
  */
 uint64_t vmm_create_address_space(void)
 {
-    return allocate_page_table();
+    uint64_t pml4_physical =
+        allocate_page_table(
+            VMM_LEVEL_PML4,
+            0
+        );
+
+    if (pml4_physical == 0)
+        return 0;
+
+    /*
+     * Every VMM-created address space must be
+     * registered before it can be activated.
+     */
+    if (register_address_space(
+            pml4_physical
+        ) != 0)
+    {
+        struct vmm_page_table_record *record =
+            find_page_table_record(
+                pml4_physical
+            );
+
+        if (record != NULL)
+            record->in_use = 0;
+
+        pmm_free_frame(
+            pml4_physical
+        );
+
+        return 0;
+    }
+
+    return pml4_physical;
+}
+
+/*
+ * Get the lifecycle state of a registered address space.
+ */
+int vmm_get_address_space_state(
+    uint64_t pml4_physical,
+    uint8_t *state
+)
+{
+    if (pml4_physical == 0 ||
+        state == NULL)
+    {
+        return -1;
+    }
+
+    struct vmm_address_space_record *record =
+        find_address_space_record(
+            pml4_physical
+        );
+
+    if (record == NULL)
+        return -1;
+
+    *state = record->state;
+
+    return 0;
+}
+
+/*
+ * Activate a registered address space.
+ *
+ * State changes happen only after the CPU has
+ * successfully loaded the requested CR3 value.
+ */
+int vmm_activate_address_space(
+    uint64_t pml4_physical
+)
+{
+    if (pml4_physical == 0)
+        return -1;
+
+    struct vmm_address_space_record *target =
+        find_address_space_record(
+            pml4_physical
+        );
+
+    if (target == NULL)
+        return -1;
+
+    /*
+     * The root must be a VMM-owned PML4.
+     */
+    if (vmm_verify_page_table_root(
+            pml4_physical
+        ) != 0)
+    {
+        return -1;
+    }
+
+    /*
+     * Idempotent activation.
+     */
+    if (active_address_space_pml4 ==
+            pml4_physical &&
+        target->state ==
+            VMM_ADDRESS_SPACE_ACTIVE)
+    {
+        return 0;
+    }
+
+    /*
+     * Interrupt-state management belongs to the caller.
+     *
+     * The current BATOS bootstrap path disables interrupts
+     * before calling this function.
+     */
+    vmm_write_cr3(
+        pml4_physical
+    );
+
+    uint64_t activated_cr3 =
+        vmm_read_cr3();
+
+    uint64_t activated_pml4 =
+        activated_cr3 &
+        ADDRESS_MASK;
+
+    /*
+     * Do not modify lifecycle metadata unless
+     * the hardware transition succeeded.
+     */
+    if (activated_pml4 !=
+        pml4_physical)
+    {
+        return -1;
+    }
+
+    /*
+     * The previous active address space becomes
+     * inactive only after the new CR3 is confirmed.
+     */
+    if (active_address_space_pml4 != 0 &&
+        active_address_space_pml4 !=
+            pml4_physical)
+    {
+        struct vmm_address_space_record *previous =
+            find_address_space_record(
+                active_address_space_pml4
+            );
+
+        if (previous != NULL)
+        {
+            previous->state =
+                VMM_ADDRESS_SPACE_INACTIVE;
+        }
+    }
+
+    target->state =
+        VMM_ADDRESS_SPACE_ACTIVE;
+
+    active_address_space_pml4 =
+        pml4_physical;
+
+    __asm__ volatile ("sti");
+
+    return 0;
+}
+
+/*
+ * Verify the lifecycle state of a registered
+ * address space.
+ */
+int vmm_verify_address_space_state(
+    uint64_t pml4_physical,
+    uint8_t expected_state
+)
+{
+    uint8_t state = 0;
+
+    if (vmm_get_address_space_state(
+            pml4_physical,
+            &state
+        ) != 0)
+    {
+        return -1;
+    }
+
+    if (state != expected_state)
+        return -1;
+
+    return 0;
 }
 
 /*
@@ -182,7 +759,9 @@ int vmm_map_page(
         get_or_create_table(
             pml4,
             pml4_index(virtual_address),
-            flags
+            flags,
+            VMM_LEVEL_PDPT,
+            pml4_physical
         );
 
     if (pdpt_physical == 0)
@@ -198,7 +777,9 @@ int vmm_map_page(
         get_or_create_table(
             pdpt,
             pdpt_index(virtual_address),
-            flags
+            flags,
+            VMM_LEVEL_PD,
+            pml4_physical
         );
 
     if (pd_physical == 0)
@@ -214,7 +795,9 @@ int vmm_map_page(
         get_or_create_table(
             pd,
             pd_index(virtual_address),
-            flags
+            flags,
+            VMM_LEVEL_PT,
+            pml4_physical
         );
 
     if (pt_physical == 0)
@@ -419,7 +1002,8 @@ void vmm_write_cr3(uint64_t pml4_physical)
  */
 static uint64_t clone_page_table(
     uint64_t source_physical,
-    int level
+    int level,
+    uint64_t owner_pml4
 )
 {
     if (source_physical == 0)
@@ -429,7 +1013,10 @@ static uint64_t clone_page_table(
         return 0;
 
     uint64_t destination_physical =
-        allocate_page_table();
+        allocate_page_table(
+            level,
+            owner_pml4
+        );
 
     if (destination_physical == 0)
         return 0;
@@ -443,6 +1030,28 @@ static uint64_t clone_page_table(
         physical_to_virtual(
             destination_physical
         );
+
+    /*
+     * The newly allocated level-3 table becomes the
+     * root owner of this cloned address space.
+     */
+    uint64_t clone_owner_pml4 =
+        owner_pml4;
+
+    if (level == VMM_LEVEL_PML4)
+        clone_owner_pml4 =
+            destination_physical;
+
+    struct vmm_page_table_record *record =
+        find_page_table_record(
+            destination_physical
+        );
+
+    if (record == NULL)
+        return 0;
+
+    record->owner_pml4 =
+        clone_owner_pml4;
 
     for (uint64_t i = 0;
          i < PAGE_TABLE_ENTRIES;
@@ -484,7 +1093,8 @@ static uint64_t clone_page_table(
         uint64_t destination_child =
             clone_page_table(
                 source_child,
-                level - 1
+                level - 1,
+                clone_owner_pml4
             );
 
         if (destination_child == 0)
@@ -559,7 +1169,8 @@ int vmm_prepare_address_space(void)
     uint64_t cloned_pml4 =
         clone_page_table(
             current_pml4_physical,
-            3
+            VMM_LEVEL_PML4,
+            0
         );
 
     if (cloned_pml4 == 0)
@@ -887,6 +1498,7 @@ int vmm_verify_recursive_clone(
  *
  * Huge-page entries are preserved exactly.
  */
+
 static int verify_clone_level(
     uint64_t source_physical,
     uint64_t destination_physical,
@@ -895,82 +1507,86 @@ static int verify_clone_level(
 {
     if (source_physical == 0 ||
         destination_physical == 0)
-        return -1;
+        return -1000000;
 
     if (level < 0 || level > 3)
-        return -1;
+        return -1000001;
 
-    /*
-     * The table pages themselves must be different.
-     */
     if (source_physical == destination_physical)
-        return -1;
+        return -1000002;
 
     uint64_t *source =
-        physical_to_virtual(
-            source_physical
-        );
+        physical_to_virtual(source_physical);
 
     uint64_t *destination =
-        physical_to_virtual(
-            destination_physical
-        );
+        physical_to_virtual(destination_physical);
 
     for (uint64_t i = 0;
          i < PAGE_TABLE_ENTRIES;
          i++)
     {
-        uint64_t source_entry =
-            source[i];
+        uint64_t source_entry = source[i];
+        uint64_t destination_entry = destination[i];
 
-        uint64_t destination_entry =
-            destination[i];
-
-        /*
-         * Empty source entries must remain empty.
-         */
         if (!(source_entry & VMM_PRESENT))
         {
             if (destination_entry & VMM_PRESENT)
-                return -1;
+            {
+                return -(
+                    1000000 +
+                    ((level + 1) * 10000) +
+                    (int)i
+                );
+            }
 
             continue;
         }
 
-        /*
-         * Huge pages terminate the hierarchy and must
-         * be preserved exactly.
-         */
         if (source_entry & VMM_HUGE)
         {
             if (destination_entry != source_entry)
-                return -1;
+            {
+                return -(
+                    2000000 +
+                    ((level + 1) * 10000) +
+                    (int)i
+                );
+            }
 
             continue;
         }
 
-        /*
-         * Every normal source mapping must exist
-         * in the clone.
-         */
         if (!(destination_entry & VMM_PRESENT))
-            return -1;
+        {
+            return -(
+                3000000 +
+                ((level + 1) * 10000) +
+                (int)i
+            );
+        }
 
-        /*
-         * At PT level, entries are final mappings.
-         */
         if (level == 0)
         {
-            if (destination_entry != source_entry)
-                return -1;
+            uint64_t source_compare =
+                source_entry &
+                ~VMM_HARDWARE_MANAGED_BITS;
+
+            uint64_t destination_compare =
+                destination_entry &
+                ~VMM_HARDWARE_MANAGED_BITS;
+
+            if (destination_compare != source_compare)
+            {
+                return -(
+                    4000000 +
+                    ((level + 1) * 10000) +
+                    (int)i
+                );
+            }
 
             continue;
         }
 
-        /*
-         * At higher levels, entries point to child
-         * page-table pages.
-         */
         uint64_t source_child =
             source_entry & ADDRESS_MASK;
 
@@ -979,25 +1595,32 @@ static int verify_clone_level(
 
         if (source_child == 0 ||
             destination_child == 0)
-            return -1;
+        {
+            return -(
+                5000000 +
+                ((level + 1) * 10000) +
+                (int)i
+            );
+        }
 
-        /*
-         * Child page-table pages must be independent.
-         */
         if (source_child == destination_child)
-            return -1;
+        {
+            return -(
+                6000000 +
+                ((level + 1) * 10000) +
+                (int)i
+            );
+        }
 
-        /*
-         * Recursively verify the child hierarchy.
-         */
-        if (verify_clone_level(
+        int child_result =
+            verify_clone_level(
                 source_child,
                 destination_child,
                 level - 1
-            ) != 0)
-        {
-            return -1;
-        }
+            );
+
+        if (child_result != 0)
+            return child_result;
     }
 
     return 0;

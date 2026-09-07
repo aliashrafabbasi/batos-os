@@ -71,6 +71,8 @@ static void serial_init(void)
     outb(COM1 + 4, 0x0B);
 }
 
+static void framebuffer_console_write_char(char c);
+
 static void serial_write_char(char c)
 {
     while ((inb(COM1 + 5) & 0x20) == 0)
@@ -78,6 +80,8 @@ static void serial_write_char(char c)
     }
 
     outb(COM1, (uint8_t)c);
+
+    framebuffer_console_write_char(c);
 }
 
 static void serial_write_string(const char *str)
@@ -119,6 +123,38 @@ static uint64_t read_cr2(void)
    ============================================================ */
 
 static struct limine_framebuffer *framebuffer = NULL;
+
+/*
+ * BATOS framebuffer kernel console.
+ *
+ * Serial output remains the primary debug transport.
+ * Once the framebuffer is initialized, every character
+ * is mirrored to the graphical console as well.
+ */
+static uint8_t framebuffer_console_initialized = 0;
+
+static uint32_t framebuffer_cursor_x = 20;
+static uint32_t framebuffer_cursor_y = 150;
+
+static uint32_t framebuffer_console_scale = 2;
+
+static const uint32_t framebuffer_console_color =
+    0x00FFFFFF;
+
+static const uint32_t framebuffer_console_background =
+    0x00000000;
+
+static const uint32_t framebuffer_console_left =
+    20;
+
+static const uint32_t framebuffer_console_top =
+    150;
+
+static const uint32_t framebuffer_console_line_height =
+    18;
+
+static const uint32_t framebuffer_console_char_width =
+    12;
 
 static void framebuffer_clear(uint32_t color)
 {
@@ -316,6 +352,9 @@ static void draw_char(
     if (!framebuffer)
         return;
 
+    if (scale == 0)
+        return;
+
     const uint8_t *glyph = get_font(c);
 
     uint32_t *pixels =
@@ -323,6 +362,12 @@ static void draw_char(
 
     uint64_t pitch =
         framebuffer->pitch / 4;
+
+    uint64_t width =
+        framebuffer->width;
+
+    uint64_t height =
+        framebuffer->height;
 
     for (uint32_t row = 0; row < 7; row++)
     {
@@ -334,13 +379,21 @@ static void draw_char(
                 {
                     for (uint32_t sx = 0; sx < scale; sx++)
                     {
-                        uint32_t px =
-                            x + col * scale + sx;
+                        uint64_t px =
+                            (uint64_t)x +
+                            (uint64_t)col * scale +
+                            sx;
 
-                        uint32_t py =
-                            y + row * scale + sy;
+                        uint64_t py =
+                            (uint64_t)y +
+                            (uint64_t)row * scale +
+                            sy;
 
-                        pixels[py * pitch + px] = color;
+                        if (px < width && py < height)
+                        {
+                            pixels[py * pitch + px] =
+                                color;
+                        }
                     }
                 }
             }
@@ -369,6 +422,179 @@ static void draw_text(
         x += 6 * scale;
         text++;
     }
+}
+
+/*
+ * Scroll only the kernel-log region.
+ *
+ * The BATOS title remains visible at the top of the
+ * framebuffer while diagnostic output scrolls below it.
+ */
+static void framebuffer_console_scroll(void)
+{
+    if (!framebuffer)
+        return;
+
+    uint32_t *pixels =
+        (uint32_t *)framebuffer->address;
+
+    uint64_t pitch =
+        framebuffer->pitch / 4;
+
+    uint64_t width =
+        framebuffer->width;
+
+    uint64_t height =
+        framebuffer->height;
+
+    uint64_t top =
+        framebuffer_console_top;
+
+    uint64_t line_height =
+        framebuffer_console_line_height;
+
+    if (top >= height)
+        return;
+
+    if (line_height >= height - top)
+        return;
+
+    for (uint64_t y = top;
+         y + line_height < height;
+         y++)
+    {
+        uint64_t source_y =
+            y + line_height;
+
+        for (uint64_t x = 0;
+             x < width;
+             x++)
+        {
+            pixels[y * pitch + x] =
+                pixels[source_y * pitch + x];
+        }
+    }
+
+    uint64_t clear_start =
+        height - line_height;
+
+    for (uint64_t y = clear_start;
+         y < height;
+         y++)
+    {
+        for (uint64_t x = 0;
+             x < width;
+             x++)
+        {
+            pixels[y * pitch + x] =
+                framebuffer_console_background;
+        }
+    }
+
+    framebuffer_cursor_y =
+        (uint32_t)(height - line_height);
+}
+
+static void framebuffer_console_newline(void)
+{
+    if (!framebuffer)
+        return;
+
+    framebuffer_cursor_x =
+        framebuffer_console_left;
+
+    framebuffer_cursor_y +=
+        framebuffer_console_line_height;
+
+    if ((uint64_t)framebuffer_cursor_y +
+            framebuffer_console_line_height >
+        framebuffer->height)
+    {
+        framebuffer_console_scroll();
+    }
+}
+
+static void framebuffer_console_write_char(char c)
+{
+    if (!framebuffer ||
+        !framebuffer_console_initialized)
+        return;
+
+    if (c == '\n')
+    {
+        framebuffer_console_newline();
+        return;
+    }
+
+    if (c == '\r')
+    {
+        framebuffer_cursor_x =
+            framebuffer_console_left;
+        return;
+    }
+
+    if (c == '\t')
+    {
+        framebuffer_cursor_x +=
+            framebuffer_console_char_width * 4;
+
+        if ((uint64_t)framebuffer_cursor_x +
+                framebuffer_console_char_width >
+            framebuffer->width)
+        {
+            framebuffer_console_newline();
+        }
+
+        return;
+    }
+
+    /*
+     * The current BATOS font is uppercase-only.
+     * Normalize lowercase diagnostic text to uppercase
+     * so it remains visible on the framebuffer.
+     */
+    if (c >= 'a' && c <= 'z')
+        c = (char)(c - ('a' - 'A'));
+
+    if ((uint64_t)framebuffer_cursor_x +
+            framebuffer_console_char_width >
+        framebuffer->width)
+    {
+        framebuffer_console_newline();
+    }
+
+    if ((uint64_t)framebuffer_cursor_y + 14 >
+        framebuffer->height)
+    {
+        framebuffer_console_scroll();
+    }
+
+    draw_char(
+        framebuffer_cursor_x,
+        framebuffer_cursor_y,
+        c,
+        framebuffer_console_color,
+        framebuffer_console_scale
+    );
+
+    framebuffer_cursor_x +=
+        framebuffer_console_char_width;
+}
+
+static void framebuffer_console_init(void)
+{
+    if (!framebuffer)
+        return;
+
+    framebuffer_console_scale = 2;
+
+    framebuffer_cursor_x =
+        framebuffer_console_left;
+
+    framebuffer_cursor_y =
+        framebuffer_console_top;
+
+    framebuffer_console_initialized = 1;
 }
 
 /* ============================================================
@@ -656,6 +882,8 @@ void kernel_main(void)
             0x00FFFFFF,
             3
         );
+
+        framebuffer_console_init();
 
         serial_write_string(
             "FRAMEBUFFER OK\n"
@@ -1490,14 +1718,18 @@ void kernel_main(void)
     serial_write_string("\n");
 
     /*
-     * ACTUAL CR3 SWITCH.
+     * VMM-3.2B owns the address-space lifecycle.
+     *
+     * The kernel keeps interrupts disabled while the VMM
+     * performs and verifies the hardware CR3 transition.
      */
-    vmm_write_cr3(
-        batos_pml4
-    );
+    int activation_result =
+        vmm_activate_address_space(
+            batos_pml4
+        );
 
     /*
-     * Read CR3 back immediately after the switch.
+     * Read CR3 back after the VMM activation API.
      */
     uint64_t activated_cr3 =
         vmm_read_cr3();
@@ -1526,7 +1758,8 @@ void kernel_main(void)
 
     serial_write_string("\n");
 
-    if (activated_pml4 == batos_pml4)
+    if (activation_result == 0 &&
+        activated_pml4 == batos_pml4)
     {
         serial_write_string(
             "CR3 SWITCH: OK\n"
@@ -1557,6 +1790,75 @@ void kernel_main(void)
 
     serial_write_string(
         "BATOS ADDRESS SPACE IS NOW ACTIVE\n"
+    );
+
+    /* --------------------------------------------------------
+       VMM-3.2B ADDRESS-SPACE LIFECYCLE VERIFICATION
+       -------------------------------------------------------- */
+
+    serial_write_string(
+        "\nVMM-3.2B ADDRESS-SPACE LIFECYCLE\n"
+    );
+
+    serial_write_string(
+        "VERIFYING BATOS ADDRESS-SPACE REGISTRATION...\n"
+    );
+
+    if (vmm_verify_address_space_state(
+            batos_pml4,
+            VMM_ADDRESS_SPACE_ACTIVE
+        ) != 0)
+    {
+        serial_write_string(
+            "VMM-3.2B: ADDRESS-SPACE REGISTRATION FAILED\n"
+        );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    serial_write_string(
+        "BATOS ADDRESS SPACE: ACTIVE\n"
+    );
+
+    serial_write_string(
+        "VERIFYING ACTIVE ADDRESS-SPACE IDENTITY...\n"
+    );
+
+    if (activated_pml4 != batos_pml4)
+    {
+        serial_write_string(
+            "ACTIVE ADDRESS-SPACE IDENTITY: FAILED\n"
+        );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    serial_write_string(
+        "ACTIVE ADDRESS-SPACE IDENTITY: OK\n"
+    );
+
+    serial_write_string(
+        "VMM-3.2B: ADDRESS-SPACE LIFECYCLE VERIFIED\n"
     );
 
     /* --------------------------------------------------------
@@ -1662,6 +1964,127 @@ void kernel_main(void)
     {
         serial_write_string(
             "VMM-2D ADDRESS SPACE: FAILED\n"
+        );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    /* --------------------------------------------------------
+       VMM-3.2A PAGE-TABLE OWNERSHIP VERIFICATION
+       -------------------------------------------------------- */
+
+    serial_write_string(
+        "\nVMM-3.2A PAGE-TABLE OWNERSHIP\n"
+    );
+
+    serial_write_string(
+        "VERIFYING BATOS PML4 OWNERSHIP...\n"
+    );
+
+    if (vmm_verify_page_table_root(pml4) != 0)
+    {
+        serial_write_string(
+            "VMM-3.2A: BATOS PML4 OWNERSHIP FAILED\n"
+        );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    serial_write_string(
+        "BATOS PML4 OWNERSHIP: OK\n"
+    );
+
+    serial_write_string(
+        "VERIFYING BATOS PAGE-TABLE PATH...\n"
+    );
+
+    if (vmm_verify_page_table_ownership(
+            pml4,
+            test_virtual
+        ) != 0)
+    {
+        serial_write_string(
+            "VMM-3.2A: PAGE-TABLE PATH OWNERSHIP FAILED\n"
+        );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    serial_write_string(
+        "BATOS PML4 -> PDPT -> PD -> PT OWNERSHIP: OK\n"
+    );
+
+    serial_write_string(
+        "VERIFYING CLONED PML4 OWNERSHIP...\n"
+    );
+
+    if (vmm_verify_page_table_root(cloned_pml4) != 0)
+    {
+        serial_write_string(
+            "VMM-3.2A: CLONED PML4 OWNERSHIP FAILED\n"
+        );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    serial_write_string(
+        "CLONED PML4 OWNERSHIP: OK\n"
+    );
+
+    if (pml4 != cloned_pml4)
+    {
+        serial_write_string(
+            "OWNERSHIP ROOTS DISTINCT: OK\n"
+        );
+
+        serial_write_string(
+            "VMM-3.2A: PAGE-TABLE OWNERSHIP VERIFIED\n"
+        );
+    }
+    else
+    {
+        serial_write_string(
+            "VMM-3.2A: OWNERSHIP ROOTS NOT DISTINCT\n"
         );
 
         serial_write_string(

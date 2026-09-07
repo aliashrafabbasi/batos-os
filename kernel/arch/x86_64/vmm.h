@@ -5,6 +5,13 @@
 
 #define VMM_PAGE_SIZE 4096ULL
 
+/*
+ * VMM-3.2B address-space lifecycle states.
+ */
+#define VMM_ADDRESS_SPACE_CREATED  0
+#define VMM_ADDRESS_SPACE_ACTIVE   1
+#define VMM_ADDRESS_SPACE_INACTIVE 2
+
 #define VMM_PRESENT  (1ULL << 0)
 #define VMM_WRITABLE (1ULL << 1)
 #define VMM_USER     (1ULL << 2)
@@ -148,6 +155,59 @@ int vmm_verify_recursive_clone(
 int vmm_verify_clone(
     uint64_t source_pml4_physical,
     uint64_t cloned_pml4_physical
+);
+
+
+
+/*
+ * Verify that a PML4 is registered as the owner
+ * of its own address space.
+ *
+ * Returns:
+ *      0  = ownership verified
+ *     -1  = verification failed
+ */
+int vmm_verify_page_table_root(
+    uint64_t pml4_physical
+);
+
+/*
+ * Verify ownership metadata for the complete
+ * PML4 -> PDPT -> PD -> PT path of a virtual address.
+ *
+ * Returns:
+ *      0  = ownership verified
+ *     -1  = verification failed
+ */
+int vmm_verify_page_table_ownership(
+    uint64_t pml4_physical,
+    uint64_t virtual_address
+);
+
+/*
+ * VMM-3.2B:
+ * Get the lifecycle state of an address space.
+ */
+int vmm_get_address_space_state(
+    uint64_t pml4_physical,
+    uint8_t *state
+);
+
+/*
+ * VMM-3.2B:
+ * Activate a registered address space.
+ */
+int vmm_activate_address_space(
+    uint64_t pml4_physical
+);
+
+/*
+ * VMM-3.2B:
+ * Verify the lifecycle state of an address space.
+ */
+int vmm_verify_address_space_state(
+    uint64_t pml4_physical,
+    uint8_t expected_state
 );
 
 #endif
