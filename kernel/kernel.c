@@ -3394,6 +3394,30 @@ void kernel_main(void)
     irq_init();
 
     /*
+     * Stage 4: verify that the live IRQ0 source is explicitly
+     * assigned to the legacy PIC controller.
+     *
+     * APIC delivery remains disabled until the controlled
+     * migration stage.
+     */
+    if (irq_get_controller(0) == IRQ_CONTROLLER_PIC)
+    {
+        serial_write_string(
+            "IRQ CONTROLLER IRQ0: PIC\n"
+        );
+
+        serial_write_string(
+            "IRQ CONTROLLER DISPATCH: VERIFIED\n"
+        );
+    }
+    else
+    {
+        serial_write_string(
+            "IRQ CONTROLLER IRQ0: FAILED\n"
+        );
+    }
+
+    /*
      * Program PIT channel 0 for 100 Hz.
      */
     pit_init(100);

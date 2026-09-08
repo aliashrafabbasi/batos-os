@@ -1,7 +1,10 @@
 #include "irq.h"
 #include "pic.h"
+#include "lapic.h"
 
 static irq_handler_t irq_handlers[IRQ_COUNT];
+
+static enum irq_controller irq_controllers[IRQ_COUNT];
 
 static volatile uint64_t irq_ticks = 0;
 
@@ -17,10 +20,14 @@ void irq_init(void)
     for (uint8_t i = 0; i < IRQ_COUNT; i++)
     {
         irq_handlers[i] = 0;
+        irq_controllers[i] = IRQ_CONTROLLER_PIC;
     }
 
     /*
      * IRQ0 is the first real hardware interrupt used by BATOS.
+     *
+     * The current live timer path remains on the legacy PIC.
+     * APIC delivery is intentionally not enabled here.
      */
     irq_register_handler(0, irq0_timer_handler);
 }
@@ -35,6 +42,37 @@ int irq_register_handler(uint8_t irq, irq_handler_t handler)
     irq_handlers[irq] = handler;
 
     return 0;
+}
+
+int irq_set_controller(
+    uint8_t irq,
+    enum irq_controller controller
+)
+{
+    if (irq >= IRQ_COUNT)
+    {
+        return -1;
+    }
+
+    if (controller != IRQ_CONTROLLER_PIC &&
+        controller != IRQ_CONTROLLER_LAPIC)
+    {
+        return -1;
+    }
+
+    irq_controllers[irq] = controller;
+
+    return 0;
+}
+
+enum irq_controller irq_get_controller(uint8_t irq)
+{
+    if (irq >= IRQ_COUNT)
+    {
+        return IRQ_CONTROLLER_PIC;
+    }
+
+    return irq_controllers[irq];
 }
 
 void irq_dispatch(struct irq_frame *frame)
@@ -59,9 +97,31 @@ void irq_dispatch(struct irq_frame *frame)
     }
 
     /*
-     * PIC EOI must be sent after the IRQ has been serviced.
+     * Complete the interrupt using the controller that
+     * delivered this IRQ.
+     *
+     * Controller selection is explicit rather than inferred
+     * from the interrupt vector. PIC and LAPIC may use the
+     * same vector space.
      */
-    pic_send_eoi(irq);
+    switch (irq_controllers[irq])
+    {
+        case IRQ_CONTROLLER_PIC:
+            pic_send_eoi(irq);
+            break;
+
+        case IRQ_CONTROLLER_LAPIC:
+            lapic_eoi();
+            break;
+
+        default:
+            /*
+             * irq_set_controller() prevents invalid values.
+             * Keep a defensive fallback to the legacy PIC path.
+             */
+            pic_send_eoi(irq);
+            break;
+    }
 }
 
 uint64_t irq_get_ticks(void)

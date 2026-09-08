@@ -6,6 +6,12 @@
 #define IRQ_VECTOR_BASE 32
 #define IRQ_COUNT 16
 
+enum irq_controller
+{
+    IRQ_CONTROLLER_PIC = 0,
+    IRQ_CONTROLLER_LAPIC = 1
+};
+
 struct irq_frame
 {
     uint64_t r15;
@@ -38,6 +44,13 @@ void irq_init(void);
 void irq_dispatch(struct irq_frame *frame);
 
 int irq_register_handler(uint8_t irq, irq_handler_t handler);
+
+int irq_set_controller(
+    uint8_t irq,
+    enum irq_controller controller
+);
+
+enum irq_controller irq_get_controller(uint8_t irq);
 
 uint64_t irq_get_ticks(void);
 
