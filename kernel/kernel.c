@@ -10,6 +10,8 @@
 #include "kernel/arch/x86_64/pic.h"
 #include "kernel/arch/x86_64/irq.h"
 #include "kernel/arch/x86_64/lapic.h"
+#include "kernel/arch/x86_64/ioapic.h"
+#include "kernel/arch/x86_64/gsi.h"
 #include "kernel/arch/x86_64/pit.h"
 #include "kernel/arch/x86_64/acpi.h"
 
@@ -2732,6 +2734,320 @@ void kernel_main(void)
 
     serial_write_string(
         "BATOS LAPIC: VERIFIED\n"
+    );
+
+    /* --------------------------------------------------------
+       I/O APIC BRING-UP
+       -------------------------------------------------------- */
+
+    serial_write_string(
+        "IOAPIC BRING-UP START\n"
+    );
+
+    int ioapic_result = ioapic_init();
+
+    if (ioapic_result != 0)
+    {
+        serial_write_string(
+            "IOAPIC: INITIALIZATION FAILED\n"
+        );
+
+        serial_write_string(
+            "IOAPIC ERROR: "
+        );
+
+        serial_write_hex(
+            (uint64_t)(uint32_t)(-ioapic_result)
+        );
+
+        serial_write_string("\n");
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    serial_write_string(
+        "IOAPIC PHYSICAL ADDRESS: "
+    );
+
+    serial_write_hex(
+        ioapic_get_physical_address()
+    );
+
+    serial_write_string("\n");
+
+    serial_write_string(
+        "IOAPIC VIRTUAL ADDRESS: "
+    );
+
+    serial_write_hex(
+        ioapic_get_virtual_address()
+    );
+
+    serial_write_string("\n");
+
+    serial_write_string(
+        "IOAPIC ID: "
+    );
+
+    serial_write_hex(
+        (uint64_t)ioapic_get_id()
+    );
+
+    serial_write_string("\n");
+
+    serial_write_string(
+        "IOAPIC VERSION: "
+    );
+
+    serial_write_hex(
+        (uint64_t)ioapic_get_version()
+    );
+
+    serial_write_string("\n");
+
+    serial_write_string(
+        "IOAPIC MAX REDIRECTION ENTRY: "
+    );
+
+    serial_write_hex(
+        (uint64_t)ioapic_get_max_redirection_entry()
+    );
+
+    serial_write_string("\n");
+
+    /*
+     * Read the first redirection entry without changing it.
+     *
+     * This verifies the IOREGSEL/IOWIN mechanism and the
+     * 64-bit redirection-table access path.
+     */
+    uint64_t ioapic_redir0 = 0;
+
+    int ioapic_redir_result =
+        ioapic_read_redirection(
+            0,
+            &ioapic_redir0
+        );
+
+    if (ioapic_redir_result != 0)
+    {
+        serial_write_string(
+            "IOAPIC REDIRECTION READ: FAILED\n"
+        );
+
+        serial_write_string(
+            "IOAPIC ERROR: "
+        );
+
+        serial_write_hex(
+            (uint64_t)(uint32_t)(-ioapic_redir_result)
+        );
+
+        serial_write_string("\n");
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    serial_write_string(
+        "IOAPIC REDIR[0]: "
+    );
+
+    serial_write_hex(
+        ioapic_redir0
+    );
+
+    serial_write_string("\n");
+
+    serial_write_string(
+        "IOAPIC MMIO: OK\n"
+    );
+
+    serial_write_string(
+        "IOAPIC REDIRECTION READ: OK\n"
+    );
+
+    serial_write_string(
+        "BATOS IOAPIC: VERIFIED\n"
+    );
+
+    /* --------------------------------------------------------
+       GSI ROUTING INFORMATION BRING-UP
+
+       This stage resolves ACPI IRQ/GSI routing only.
+       No IOAPIC redirection entry is modified and no
+       APIC interrupt is enabled here.
+       -------------------------------------------------------- */
+
+    serial_write_string(
+        "GSI ROUTING BRING-UP START\n"
+    );
+
+    int gsi_result = gsi_init();
+
+    if (gsi_result != 0)
+    {
+        serial_write_string(
+            "GSI: INITIALIZATION FAILED\n"
+        );
+
+        serial_write_string(
+            "GSI ERROR: "
+        );
+
+        serial_write_hex(
+            (uint64_t)(uint32_t)(-gsi_result)
+        );
+
+        serial_write_string("\n");
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    struct gsi_irq_route gsi_irq0_route;
+
+    if (gsi_resolve_irq(
+            0,
+            &gsi_irq0_route
+        ) != 0)
+    {
+        serial_write_string(
+            "GSI IRQ0 ROUTE: FAILED\n"
+        );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    serial_write_string(
+        "GSI IRQ0 ROUTE: GSI="
+    );
+
+    serial_write_hex(
+        (uint64_t)gsi_irq0_route.gsi
+    );
+
+    serial_write_string(
+        " IOAPIC="
+    );
+
+    serial_write_hex(
+        (uint64_t)gsi_irq0_route.ioapic_index
+    );
+
+    serial_write_string(
+        " REDIR="
+    );
+
+    serial_write_hex(
+        (uint64_t)
+        gsi_irq0_route.ioapic_redirection_index
+    );
+
+    serial_write_string(
+        " POLARITY="
+    );
+
+    serial_write_hex(
+        (uint64_t)gsi_irq0_route.polarity
+    );
+
+    serial_write_string(
+        " TRIGGER="
+    );
+
+    serial_write_hex(
+        (uint64_t)gsi_irq0_route.trigger_mode
+    );
+
+    serial_write_string(
+        " ISO="
+    );
+
+    serial_write_hex(
+        (uint64_t)gsi_irq0_route.has_iso
+    );
+
+    serial_write_string("\n");
+
+    /*
+     * QEMU's current MADT reports:
+     *
+     *   ISA IRQ0 -> GSI2
+     *
+     * with conforming polarity/trigger flags, which resolve
+     * to the ISA defaults:
+     *
+     *   active-high + edge-triggered.
+     */
+    if (gsi_irq0_route.gsi != 2 ||
+        gsi_irq0_route.ioapic_index != 0 ||
+        gsi_irq0_route.ioapic_redirection_index != 2 ||
+        gsi_irq0_route.polarity != GSI_POLARITY_HIGH ||
+        gsi_irq0_route.trigger_mode != GSI_TRIGGER_EDGE ||
+        gsi_irq0_route.has_iso != 1)
+    {
+        serial_write_string(
+            "GSI IRQ0 ROUTE: FAILED\n"
+        );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    serial_write_string(
+        "GSI IRQ0 ROUTE: VERIFIED\n"
+    );
+
+    serial_write_string(
+        "GSI ROUTING: VERIFIED\n"
     );
 
     /* --------------------------------------------------------
