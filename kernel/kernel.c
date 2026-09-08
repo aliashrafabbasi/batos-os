@@ -3422,17 +3422,325 @@ void kernel_main(void)
      */
     pit_init(100);
 
-    /*
-     * Enable only IRQ0.
-     */
-    pic_clear_mask(0);
+    /* --------------------------------------------------------
+       STAGE 5: CONTROLLED IRQ0 MIGRATION TO LAPIC
+       --------------------------------------------------------
+
+       PIT IRQ0 is migrated from:
+
+           PIT -> PIC -> vector 32 -> irq_dispatch()
+
+       to:
+
+           PIT -> IRQ0 -> MADT ISO -> GSI
+               -> IOAPIC -> LAPIC -> vector 32
+               -> irq_stub_0 -> irq_dispatch()
+               -> LAPIC EOI
+
+       PIC IRQ0 remains masked throughout the transition.
+       The IOAPIC entry is programmed and verified while
+       masked, controller ownership is switched to LAPIC,
+       and only then is IOAPIC delivery enabled.
+       -------------------------------------------------------- */
 
     serial_write_string(
-        "PIC READY\n"
+        "IOAPIC STAGE 5: IRQ0 LAPIC MIGRATION START\n"
+    );
+
+    /*
+     * Block CPU interrupt delivery while controller ownership
+     * and IOAPIC routing are changed.
+     */
+    __asm__ volatile (
+        "cli"
+        :
+        :
+        : "memory"
+    );
+
+    /*
+     * Keep the legacy PIC IRQ0 masked.
+     */
+    pic_set_mask(0);
+
+    serial_write_string(
+        "IOAPIC STAGE 5 PIC IRQ0: MASKED\n"
+    );
+
+    uint32_t stage5_ioapic_index =
+        gsi_irq0_route.ioapic_index;
+
+    uint8_t stage5_redirection_index =
+        (uint8_t)(
+            gsi_irq0_route.ioapic_redirection_index
+        );
+
+    uint8_t stage5_lapic_id =
+        (uint8_t)(lapic_id >> 24);
+
+    /*
+     * Program vector 32 so the existing irq_stub_0 path
+     * remains unchanged.
+     */
+    uint64_t stage5_expected =
+        IOAPIC_IRQ0_VECTOR |
+        IOAPIC_REDIR_DELIVERY_FIXED |
+        IOAPIC_REDIR_MASKED |
+        ((uint64_t)stage5_lapic_id << 56);
+
+    /*
+     * Preserve the electrical characteristics resolved
+     * from the ACPI MADT interrupt source override.
+     */
+    if (gsi_irq0_route.polarity == GSI_POLARITY_LOW)
+    {
+        stage5_expected |= IOAPIC_REDIR_POLARITY_LOW;
+    }
+    else if (gsi_irq0_route.polarity != GSI_POLARITY_HIGH)
+    {
+        serial_write_string(
+            "IOAPIC STAGE 5 POLARITY: FAILED\n"
+        );
+        serial_write_string("CPU HALTED\n");
+
+        for (;;)
+        {
+            __asm__ volatile ("cli\nhlt");
+        }
+    }
+
+    if (gsi_irq0_route.trigger_mode == GSI_TRIGGER_LEVEL)
+    {
+        stage5_expected |= IOAPIC_REDIR_TRIGGER_LEVEL;
+    }
+    else if (gsi_irq0_route.trigger_mode != GSI_TRIGGER_EDGE)
+    {
+        serial_write_string(
+            "IOAPIC STAGE 5 TRIGGER: FAILED\n"
+        );
+        serial_write_string("CPU HALTED\n");
+
+        for (;;)
+        {
+            __asm__ volatile ("cli\nhlt");
+        }
+    }
+
+    serial_write_string(
+        "IOAPIC STAGE 5 ROUTE: IRQ0 -> GSI="
+    );
+    serial_write_hex(
+        (uint64_t)gsi_irq0_route.gsi
+    );
+    serial_write_string(
+        " -> IOAPIC="
+    );
+    serial_write_hex(
+        (uint64_t)stage5_ioapic_index
+    );
+    serial_write_string(
+        " -> REDIR="
+    );
+    serial_write_hex(
+        (uint64_t)stage5_redirection_index
+    );
+    serial_write_string("\n");
+
+    serial_write_string(
+        "IOAPIC STAGE 5 VECTOR: "
+    );
+    serial_write_hex(
+        (uint64_t)IOAPIC_IRQ0_VECTOR
+    );
+    serial_write_string("\n");
+
+    serial_write_string(
+        "IOAPIC STAGE 5 LAPIC DESTINATION: "
+    );
+    serial_write_hex(
+        (uint64_t)stage5_lapic_id
+    );
+    serial_write_string("\n");
+
+    serial_write_string(
+        "IOAPIC STAGE 5 EXPECTED MASKED: "
+    );
+    serial_write_hex(stage5_expected);
+    serial_write_string("\n");
+
+    /*
+     * Program the IOAPIC entry while it is still masked.
+     */
+    int stage5_write_result =
+        ioapic_write_redirection_at(
+            stage5_ioapic_index,
+            stage5_redirection_index,
+            stage5_expected
+        );
+
+    if (stage5_write_result != 0)
+    {
+        serial_write_string(
+            "IOAPIC STAGE 5 WRITE: FAILED\n"
+        );
+        serial_write_string("CPU HALTED\n");
+
+        for (;;)
+        {
+            __asm__ volatile ("cli\nhlt");
+        }
+    }
+
+    uint64_t stage5_actual = 0;
+
+    int stage5_read_result =
+        ioapic_read_redirection_at(
+            stage5_ioapic_index,
+            stage5_redirection_index,
+            &stage5_actual
+        );
+
+    if (stage5_read_result != 0)
+    {
+        serial_write_string(
+            "IOAPIC STAGE 5 READBACK: FAILED\n"
+        );
+        serial_write_string("CPU HALTED\n");
+
+        for (;;)
+        {
+            __asm__ volatile ("cli\nhlt");
+        }
+    }
+
+    serial_write_string(
+        "IOAPIC STAGE 5 ACTUAL MASKED: "
+    );
+    serial_write_hex(stage5_actual);
+    serial_write_string("\n");
+
+    if (stage5_actual != stage5_expected ||
+        (stage5_actual & IOAPIC_REDIR_MASKED) == 0)
+    {
+        serial_write_string(
+            "IOAPIC STAGE 5 MASKED READBACK: FAILED\n"
+        );
+        serial_write_string("CPU HALTED\n");
+
+        for (;;)
+        {
+            __asm__ volatile ("cli\nhlt");
+        }
+    }
+
+    serial_write_string(
+        "IOAPIC STAGE 5 MASKED READBACK: VERIFIED\n"
+    );
+
+    /*
+     * Switch software IRQ ownership BEFORE unmasking the
+     * IOAPIC entry.
+     */
+    if (irq_set_controller(
+            0,
+            IRQ_CONTROLLER_LAPIC
+        ) != 0)
+    {
+        serial_write_string(
+            "IOAPIC STAGE 5 CONTROLLER SWITCH: FAILED\n"
+        );
+        serial_write_string("CPU HALTED\n");
+
+        for (;;)
+        {
+            __asm__ volatile ("cli\nhlt");
+        }
+    }
+
+    if (irq_get_controller(0) != IRQ_CONTROLLER_LAPIC)
+    {
+        serial_write_string(
+            "IOAPIC STAGE 5 CONTROLLER VERIFY: FAILED\n"
+        );
+        serial_write_string("CPU HALTED\n");
+
+        for (;;)
+        {
+            __asm__ volatile ("cli\nhlt");
+        }
+    }
+
+    serial_write_string(
+        "IOAPIC STAGE 5 CONTROLLER: LAPIC\n"
+    );
+
+    /*
+     * Remove ONLY the mask bit.
+     */
+    uint64_t stage5_unmasked =
+        stage5_expected &
+        ~IOAPIC_REDIR_MASKED;
+
+    if (ioapic_write_redirection_at(
+            stage5_ioapic_index,
+            stage5_redirection_index,
+            stage5_unmasked
+        ) != 0)
+    {
+        serial_write_string(
+            "IOAPIC STAGE 5 UNMASK: WRITE FAILED\n"
+        );
+        serial_write_string("CPU HALTED\n");
+
+        for (;;)
+        {
+            __asm__ volatile ("cli\nhlt");
+        }
+    }
+
+    uint64_t stage5_unmasked_actual = 0;
+
+    if (ioapic_read_redirection_at(
+            stage5_ioapic_index,
+            stage5_redirection_index,
+            &stage5_unmasked_actual
+        ) != 0)
+    {
+        serial_write_string(
+            "IOAPIC STAGE 5 UNMASK: READ FAILED\n"
+        );
+        serial_write_string("CPU HALTED\n");
+
+        for (;;)
+        {
+            __asm__ volatile ("cli\nhlt");
+        }
+    }
+
+    if (stage5_unmasked_actual != stage5_unmasked ||
+        (stage5_unmasked_actual & IOAPIC_REDIR_MASKED) != 0)
+    {
+        serial_write_string(
+            "IOAPIC STAGE 5 UNMASK READBACK: FAILED\n"
+        );
+        serial_write_string("CPU HALTED\n");
+
+        for (;;)
+        {
+            __asm__ volatile ("cli\nhlt");
+        }
+    }
+
+    serial_write_string(
+        "IOAPIC STAGE 5 UNMASK READBACK: VERIFIED\n"
     );
 
     serial_write_string(
-        "IRQ0 ENABLED\n"
+        "IOAPIC STAGE 5 INTERRUPT DELIVERY: ENABLED\n"
+    );
+
+    serial_write_string(
+        "IOAPIC STAGE 5: LAPIC IRQ0 PATH ARMED\n"
     );
 
     serial_write_string(

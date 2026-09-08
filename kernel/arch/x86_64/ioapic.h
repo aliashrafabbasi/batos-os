@@ -17,6 +17,7 @@
  * redirection entry remains masked.
  */
 #define IOAPIC_STAGE3_TEST_VECTOR 0x50U
+#define IOAPIC_IRQ0_VECTOR         32U
 
 /*
  * Redirection-table entry bits.
