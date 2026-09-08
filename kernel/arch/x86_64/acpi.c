@@ -57,6 +57,73 @@ static uint32_t root_table_count = 0;
 static uint8_t root_table_is_xsdt = 0;
 static uint64_t madt_address = 0;
 
+#define ACPI_MADT_TYPE_LOCAL_APIC 0
+#define ACPI_MADT_TYPE_IO_APIC    1
+#define ACPI_MADT_TYPE_ISO        2
+
+struct acpi_madt_header
+{
+    struct acpi_sdt_header sdt;
+
+    uint32_t local_apic_address;
+    uint32_t flags;
+} __attribute__((packed));
+
+struct acpi_madt_entry_header
+{
+    uint8_t type;
+    uint8_t length;
+} __attribute__((packed));
+
+struct acpi_madt_local_apic_entry
+{
+    struct acpi_madt_entry_header header;
+
+    uint8_t processor_uid;
+    uint8_t apic_id;
+    uint32_t flags;
+} __attribute__((packed));
+
+struct acpi_madt_io_apic_entry
+{
+    struct acpi_madt_entry_header header;
+
+    uint8_t io_apic_id;
+    uint8_t reserved;
+    uint32_t io_apic_address;
+    uint32_t global_system_interrupt_base;
+} __attribute__((packed));
+
+struct acpi_madt_iso_entry
+{
+    struct acpi_madt_entry_header header;
+
+    uint8_t bus;
+    uint8_t source;
+    uint32_t global_system_interrupt;
+    uint16_t flags;
+} __attribute__((packed));
+
+static uint32_t madt_local_apic_address = 0;
+static uint32_t madt_flags = 0;
+
+static struct acpi_madt_local_apic
+    madt_local_apics[ACPI_MAX_MADT_LOCAL_APICS];
+
+static uint32_t madt_local_apic_count = 0;
+
+static struct acpi_madt_io_apic
+    madt_io_apics[ACPI_MAX_MADT_IO_APICS];
+
+static uint32_t madt_io_apic_count = 0;
+
+static struct acpi_madt_iso
+    madt_isos[ACPI_MAX_MADT_ISOS];
+
+static uint32_t madt_iso_count = 0;
+
+static uint32_t madt_unknown_entry_count = 0;
+
 static uint8_t acpi_checksum(
     const uint8_t *data,
     uint64_t length
@@ -197,6 +264,236 @@ static int acpi_validate_sdt(
  *  -1  invalid physical address conversion
  *  -2  invalid SDT
  */
+/*
+ * Parse the MADT structure.
+ *
+ * The generic SDT validator has already verified the complete
+ * table and checksum before this parser is called.
+ *
+ * Supported entries:
+ *   Type 0 - Processor Local APIC
+ *   Type 1 - I/O APIC
+ *   Type 2 - Interrupt Source Override
+ *
+ * Unknown entry types are safely skipped.
+ */
+static int acpi_parse_madt(
+    uint64_t physical_address
+)
+{
+    volatile struct acpi_madt_header *madt =
+        (volatile struct acpi_madt_header *)
+        acpi_phys_to_virt(
+            physical_address,
+            sizeof(struct acpi_madt_header));
+
+    if (madt == 0)
+    {
+        return -1;
+    }
+
+    if (madt->sdt.length <
+        sizeof(struct acpi_madt_header))
+    {
+        return -2;
+    }
+
+    uint64_t table_start =
+        physical_address;
+
+    uint64_t table_length =
+        (uint64_t)madt->sdt.length;
+
+    if (table_start >
+        UINT64_MAX - table_length)
+    {
+        return -3;
+    }
+
+    uint64_t table_end =
+        table_start + table_length;
+
+    madt_local_apic_address =
+        madt->local_apic_address;
+
+    madt_flags =
+        madt->flags;
+
+    madt_local_apic_count = 0;
+    madt_io_apic_count = 0;
+    madt_iso_count = 0;
+    madt_unknown_entry_count = 0;
+
+    uint64_t entry_physical =
+        table_start +
+        sizeof(struct acpi_madt_header);
+
+    while (entry_physical < table_end)
+    {
+        if (entry_physical >
+            table_end - sizeof(struct acpi_madt_entry_header))
+        {
+            return -4;
+        }
+
+        volatile struct acpi_madt_entry_header *entry =
+            (volatile struct acpi_madt_entry_header *)
+            acpi_phys_to_virt(
+                entry_physical,
+                sizeof(struct acpi_madt_entry_header));
+
+        if (entry == 0)
+        {
+            return -5;
+        }
+
+        uint8_t type = entry->type;
+        uint8_t length = entry->length;
+
+        if (length == 0)
+        {
+            return -6;
+        }
+
+        if (length <
+            sizeof(struct acpi_madt_entry_header))
+        {
+            return -7;
+        }
+
+        if ((uint64_t)length >
+            table_end - entry_physical)
+        {
+            return -8;
+        }
+
+        if (type == ACPI_MADT_TYPE_LOCAL_APIC)
+        {
+            if (length <
+                sizeof(struct acpi_madt_local_apic_entry))
+            {
+                return -9;
+            }
+
+            if (madt_local_apic_count >=
+                ACPI_MAX_MADT_LOCAL_APICS)
+            {
+                return -10;
+            }
+
+            volatile struct acpi_madt_local_apic_entry *local_apic =
+                (volatile struct acpi_madt_local_apic_entry *)
+                acpi_phys_to_virt(
+                    entry_physical,
+                    sizeof(struct acpi_madt_local_apic_entry));
+
+            if (local_apic == 0)
+            {
+                return -11;
+            }
+
+            madt_local_apics[madt_local_apic_count].processor_uid =
+                local_apic->processor_uid;
+
+            madt_local_apics[madt_local_apic_count].apic_id =
+                local_apic->apic_id;
+
+            madt_local_apics[madt_local_apic_count].flags =
+                local_apic->flags;
+
+            madt_local_apic_count++;
+        }
+        else if (type == ACPI_MADT_TYPE_IO_APIC)
+        {
+            if (length <
+                sizeof(struct acpi_madt_io_apic_entry))
+            {
+                return -12;
+            }
+
+            if (madt_io_apic_count >=
+                ACPI_MAX_MADT_IO_APICS)
+            {
+                return -13;
+            }
+
+            volatile struct acpi_madt_io_apic_entry *io_apic =
+                (volatile struct acpi_madt_io_apic_entry *)
+                acpi_phys_to_virt(
+                    entry_physical,
+                    sizeof(struct acpi_madt_io_apic_entry));
+
+            if (io_apic == 0)
+            {
+                return -14;
+            }
+
+            madt_io_apics[madt_io_apic_count].id =
+                io_apic->io_apic_id;
+
+            madt_io_apics[madt_io_apic_count].address =
+                (uint64_t)io_apic->io_apic_address;
+
+            madt_io_apics[madt_io_apic_count].gsi_base =
+                io_apic->global_system_interrupt_base;
+
+            madt_io_apic_count++;
+        }
+        else if (type == ACPI_MADT_TYPE_ISO)
+        {
+            if (length <
+                sizeof(struct acpi_madt_iso_entry))
+            {
+                return -15;
+            }
+
+            if (madt_iso_count >=
+                ACPI_MAX_MADT_ISOS)
+            {
+                return -16;
+            }
+
+            volatile struct acpi_madt_iso_entry *iso =
+                (volatile struct acpi_madt_iso_entry *)
+                acpi_phys_to_virt(
+                    entry_physical,
+                    sizeof(struct acpi_madt_iso_entry));
+
+            if (iso == 0)
+            {
+                return -17;
+            }
+
+            madt_isos[madt_iso_count].bus =
+                iso->bus;
+
+            madt_isos[madt_iso_count].source =
+                iso->source;
+
+            madt_isos[madt_iso_count].gsi =
+                iso->global_system_interrupt;
+
+            madt_isos[madt_iso_count].flags =
+                iso->flags;
+
+            madt_iso_count++;
+        }
+        else
+        {
+            madt_unknown_entry_count++;
+        }
+
+        entry_physical += (uint64_t)length;
+    }
+
+    if (entry_physical != table_end)
+    {
+        return -18;
+    }
+
+    return 0;
+}
+
 static int acpi_inspect_table(
     uint64_t physical_address
 )
@@ -378,6 +675,12 @@ int acpi_init(void)
     root_table_count = 0;
     root_table_is_xsdt = 0;
     madt_address = 0;
+    madt_local_apic_address = 0;
+    madt_flags = 0;
+    madt_local_apic_count = 0;
+    madt_io_apic_count = 0;
+    madt_iso_count = 0;
+    madt_unknown_entry_count = 0;
 
     if (limine_rsdp_request.response == 0)
     {
@@ -451,6 +754,14 @@ int acpi_init(void)
                 return -7;
             }
 
+            if (madt_address != 0)
+            {
+                if (acpi_parse_madt(madt_address) != 0)
+                {
+                    return -19;
+                }
+            }
+
             return 0;
         }
     }
@@ -476,6 +787,14 @@ int acpi_init(void)
             &root_table_count) != 0)
     {
         return -9;
+    }
+
+    if (madt_address != 0)
+    {
+        if (acpi_parse_madt(madt_address) != 0)
+        {
+            return -19;
+        }
     }
 
     return 0;
@@ -509,4 +828,68 @@ uint8_t acpi_root_table_is_xsdt(void)
 uint64_t acpi_get_madt_address(void)
 {
     return madt_address;
+}
+
+
+uint32_t acpi_get_madt_local_apic_address(void)
+{
+    return madt_local_apic_address;
+}
+
+uint32_t acpi_get_madt_flags(void)
+{
+    return madt_flags;
+}
+
+uint32_t acpi_get_madt_local_apic_count(void)
+{
+    return madt_local_apic_count;
+}
+
+const struct acpi_madt_local_apic *
+acpi_get_madt_local_apic(uint32_t index)
+{
+    if (index >= madt_local_apic_count)
+    {
+        return 0;
+    }
+
+    return &madt_local_apics[index];
+}
+
+uint32_t acpi_get_madt_io_apic_count(void)
+{
+    return madt_io_apic_count;
+}
+
+const struct acpi_madt_io_apic *
+acpi_get_madt_io_apic(uint32_t index)
+{
+    if (index >= madt_io_apic_count)
+    {
+        return 0;
+    }
+
+    return &madt_io_apics[index];
+}
+
+uint32_t acpi_get_madt_iso_count(void)
+{
+    return madt_iso_count;
+}
+
+const struct acpi_madt_iso *
+acpi_get_madt_iso(uint32_t index)
+{
+    if (index >= madt_iso_count)
+    {
+        return 0;
+    }
+
+    return &madt_isos[index];
+}
+
+uint32_t acpi_get_madt_unknown_entry_count(void)
+{
+    return madt_unknown_entry_count;
 }
