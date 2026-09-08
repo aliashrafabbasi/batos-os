@@ -152,6 +152,13 @@ void idt_init(void)
     idt_set_gate(47, (uint64_t)irq_stub_15);
 
     /*
+     * LAPIC spurious interrupts use vector 0xFF.
+     * Install the dedicated handler before LAPIC SVR
+     * software-enable can expose that vector.
+     */
+    idt_set_gate(0xFF, (uint64_t)lapic_spurious_stub);
+
+    /*
      * Build IDTR.
      */
     idt_descriptor.limit =

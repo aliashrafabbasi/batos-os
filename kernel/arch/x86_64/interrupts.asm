@@ -462,6 +462,7 @@ global irq_stub_12
 global irq_stub_13
 global irq_stub_14
 global irq_stub_15
+global lapic_spurious_stub
 
 extern irq_dispatch
 
@@ -581,3 +582,24 @@ irq_stub_14:
 irq_stub_15:
     push 47
     jmp irq_common
+
+
+; ============================================================
+; LAPIC spurious interrupt
+; ============================================================
+;
+; Vector 0xFF belongs to the Local APIC, not the legacy PIC.
+;
+; Therefore this handler:
+;   - does not enter irq_common
+;   - does not call irq_dispatch
+;   - does not issue a PIC EOI
+;   - does not modify general-purpose registers
+;
+; The CPU has already pushed the interrupt return frame,
+; so a direct iretq is sufficient.
+;
+; ============================================================
+
+lapic_spurious_stub:
+    iretq

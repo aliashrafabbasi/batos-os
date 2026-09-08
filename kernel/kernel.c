@@ -9,6 +9,7 @@
 #include "kernel/arch/x86_64/idt.h"
 #include "kernel/arch/x86_64/pic.h"
 #include "kernel/arch/x86_64/irq.h"
+#include "kernel/arch/x86_64/lapic.h"
 #include "kernel/arch/x86_64/pit.h"
 #include "kernel/arch/x86_64/acpi.h"
 
@@ -2591,6 +2592,146 @@ void kernel_main(void)
 
     serial_write_string(
         "BATOS HARDWARE ADDRESS TRANSLATION: OK\n"
+    );
+
+    /* --------------------------------------------------------
+       LOCAL APIC BRING-UP
+       -------------------------------------------------------- */
+
+    serial_write_string(
+        "LAPIC BRING-UP START\n"
+    );
+
+    int lapic_result = lapic_init();
+
+    if (lapic_result != 0)
+    {
+        serial_write_string(
+            "LAPIC: INITIALIZATION FAILED\n"
+        );
+
+        serial_write_string(
+            "LAPIC ERROR: "
+        );
+
+        serial_write_hex(
+            (uint64_t)(uint32_t)(-lapic_result)
+        );
+
+        serial_write_string("\n");
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\nhlt"
+            );
+        }
+    }
+
+    serial_write_string(
+        "LAPIC PHYSICAL ADDRESS: "
+    );
+
+    serial_write_hex(
+        lapic_get_physical_address()
+    );
+
+    serial_write_string("\n");
+
+    serial_write_string(
+        "LAPIC VIRTUAL ADDRESS: "
+    );
+
+    serial_write_hex(
+        lapic_get_virtual_address()
+    );
+
+    serial_write_string("\n");
+
+    uint32_t lapic_id =
+        lapic_read(LAPIC_REG_ID);
+
+    uint32_t lapic_version =
+        lapic_read(LAPIC_REG_VERSION);
+
+    uint32_t lapic_svr =
+        lapic_read(LAPIC_REG_SVR);
+
+    serial_write_string(
+        "LAPIC ID: "
+    );
+
+    serial_write_hex(
+        (uint64_t)(lapic_id >> 24)
+    );
+
+    serial_write_string("\n");
+
+    serial_write_string(
+        "LAPIC VERSION: "
+    );
+
+    serial_write_hex(
+        (uint64_t)(lapic_version & 0xFFU)
+    );
+
+    serial_write_string("\n");
+
+    serial_write_string(
+        "LAPIC MAX LVT: "
+    );
+
+    serial_write_hex(
+        (uint64_t)((lapic_version >> 16) & 0xFFU)
+    );
+
+    serial_write_string("\n");
+
+    serial_write_string(
+        "LAPIC SVR: "
+    );
+
+    serial_write_hex(
+        (uint64_t)lapic_svr
+    );
+
+    serial_write_string("\n");
+
+    if ((lapic_svr & LAPIC_SVR_ENABLE) == 0)
+    {
+        serial_write_string(
+            "LAPIC SOFTWARE ENABLE: FAILED\n"
+        );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\nhlt"
+            );
+        }
+    }
+
+    serial_write_string(
+        "LAPIC MMIO: OK\n"
+    );
+
+    serial_write_string(
+        "LAPIC SOFTWARE ENABLE: OK\n"
+    );
+
+    serial_write_string(
+        "LAPIC EOI: ISSUED\n"
+    );
+
+    serial_write_string(
+        "BATOS LAPIC: VERIFIED\n"
     );
 
     /* --------------------------------------------------------

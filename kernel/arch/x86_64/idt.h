@@ -85,6 +85,8 @@ extern void irq_stub_13(void);
 extern void irq_stub_14(void);
 extern void irq_stub_15(void);
 
+extern void lapic_spurious_stub(void);
+
 __attribute__((noreturn))
 void exception_handler(struct exception_frame *frame);
 
