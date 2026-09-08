@@ -130,6 +130,28 @@ void idt_init(void)
     idt_set_gate(31, (uint64_t)exception_stub_31);
 
     /*
+     * Hardware IRQ handlers.
+     *
+     * PIC IRQ0-15 are mapped to vectors 32-47.
+     */
+    idt_set_gate(32, (uint64_t)irq_stub_0);
+    idt_set_gate(33, (uint64_t)irq_stub_1);
+    idt_set_gate(34, (uint64_t)irq_stub_2);
+    idt_set_gate(35, (uint64_t)irq_stub_3);
+    idt_set_gate(36, (uint64_t)irq_stub_4);
+    idt_set_gate(37, (uint64_t)irq_stub_5);
+    idt_set_gate(38, (uint64_t)irq_stub_6);
+    idt_set_gate(39, (uint64_t)irq_stub_7);
+    idt_set_gate(40, (uint64_t)irq_stub_8);
+    idt_set_gate(41, (uint64_t)irq_stub_9);
+    idt_set_gate(42, (uint64_t)irq_stub_10);
+    idt_set_gate(43, (uint64_t)irq_stub_11);
+    idt_set_gate(44, (uint64_t)irq_stub_12);
+    idt_set_gate(45, (uint64_t)irq_stub_13);
+    idt_set_gate(46, (uint64_t)irq_stub_14);
+    idt_set_gate(47, (uint64_t)irq_stub_15);
+
+    /*
      * Build IDTR.
      */
     idt_descriptor.limit =

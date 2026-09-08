@@ -7,6 +7,9 @@
 #include "kernel/arch/x86_64/pmm.h"
 #include "kernel/arch/x86_64/vmm.h"
 #include "kernel/arch/x86_64/idt.h"
+#include "kernel/arch/x86_64/pic.h"
+#include "kernel/arch/x86_64/irq.h"
+#include "kernel/arch/x86_64/pit.h"
 
 /* ============================================================
    LIMINE FRAMEBUFFER REQUEST
@@ -2236,6 +2239,133 @@ void kernel_main(void)
     serial_write_string(
         "BATOS HARDWARE ADDRESS TRANSLATION: OK\n"
     );
+
+    /* --------------------------------------------------------
+       HARDWARE IRQ / TIMER BRING-UP
+       -------------------------------------------------------- */
+
+    serial_write_string(
+        "IRQ TIMER BRING-UP START\n"
+    );
+
+    /*
+     * Initialize and remap the legacy 8259 PIC.
+     *
+     * Keep every IRQ masked while the interrupt subsystem
+     * and PIT are being configured.
+     */
+    pic_init();
+
+    for (uint8_t irq = 0; irq < IRQ_COUNT; irq++)
+    {
+        pic_set_mask(irq);
+    }
+
+    /*
+     * Register BATOS IRQ handlers.
+     *
+     * IRQ0 is handled by the timer handler in irq.c.
+     */
+    irq_init();
+
+    /*
+     * Program PIT channel 0 for 100 Hz.
+     */
+    pit_init(100);
+
+    /*
+     * Enable only IRQ0.
+     */
+    pic_clear_mask(0);
+
+    serial_write_string(
+        "PIC READY\n"
+    );
+
+    serial_write_string(
+        "IRQ0 ENABLED\n"
+    );
+
+    serial_write_string(
+        "PIT 100HZ READY\n"
+    );
+
+    uint64_t start_ticks = irq_get_ticks();
+
+    serial_write_string(
+        "IRQ0 TEST WAITING\n"
+    );
+
+    /*
+     * Enable maskable hardware interrupts only after
+     * PIC, IRQ handlers and PIT are completely ready.
+     */
+    __asm__ volatile (
+        "sti"
+        :
+        :
+        : "memory"
+    );
+
+    /*
+     * Wait for 100 real IRQ0 timer ticks.
+     *
+     * At 100 Hz this should take approximately one second.
+     */
+    while (irq_get_ticks() < start_ticks + 100)
+    {
+        __asm__ volatile (
+            "hlt"
+            :
+            :
+            : "memory"
+        );
+    }
+
+    /*
+     * Stop maskable interrupts before reporting the result.
+     */
+    __asm__ volatile (
+        "cli"
+        :
+        :
+        : "memory"
+    );
+
+    uint64_t end_ticks = irq_get_ticks();
+
+    serial_write_string(
+        "IRQ0 TEST START TICKS: "
+    );
+    serial_write_hex(start_ticks);
+    serial_write_string("\n");
+
+    serial_write_string(
+        "IRQ0 TEST END TICKS: "
+    );
+    serial_write_hex(end_ticks);
+    serial_write_string("\n");
+
+    if (end_ticks >= start_ticks + 100)
+    {
+        serial_write_string(
+            "IRQ0 TIMER: VERIFIED\n"
+        );
+
+        serial_write_string(
+            "HARDWARE INTERRUPTS: VERIFIED\n"
+        );
+    }
+    else
+    {
+        serial_write_string(
+            "IRQ0 TIMER: FAILED\n"
+        );
+
+        serial_write_string(
+            "HARDWARE INTERRUPTS: FAILED\n"
+        );
+    }
 
     /* --------------------------------------------------------
        FINAL HALT

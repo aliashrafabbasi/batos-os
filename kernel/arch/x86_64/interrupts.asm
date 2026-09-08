@@ -431,3 +431,153 @@ exception_stub_31:
     push 0
     push 31
     jmp exception_common
+
+; ============================================================
+; Hardware IRQ common handler
+;
+; IRQ CPU frame before our pushes:
+;
+;   [rsp + 0]  = vector
+;   [rsp + 8]  = RIP
+;   [rsp + 16] = CS
+;   [rsp + 24] = RFLAGS
+;
+; Unlike CPU exceptions, hardware IRQs do not provide
+; an error-code slot.
+; ============================================================
+
+global irq_stub_0
+global irq_stub_1
+global irq_stub_2
+global irq_stub_3
+global irq_stub_4
+global irq_stub_5
+global irq_stub_6
+global irq_stub_7
+global irq_stub_8
+global irq_stub_9
+global irq_stub_10
+global irq_stub_11
+global irq_stub_12
+global irq_stub_13
+global irq_stub_14
+global irq_stub_15
+
+extern irq_dispatch
+
+
+irq_common:
+    cld
+
+    push rax
+    push rbx
+    push rcx
+    push rdx
+    push rbp
+    push rsi
+    push rdi
+    push r8
+    push r9
+    push r10
+    push r11
+    push r12
+    push r13
+    push r14
+    push r15
+
+    mov rdi, rsp
+    mov rbx, rsp
+    and rsp, -16
+
+    call irq_dispatch
+
+    mov rsp, rbx
+
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop r11
+    pop r10
+    pop r9
+    pop r8
+    pop rdi
+    pop rsi
+    pop rbp
+    pop rdx
+    pop rcx
+    pop rbx
+    pop rax
+
+    add rsp, 8
+
+    iretq
+
+
+; ============================================================
+; IRQ 0-15
+; ============================================================
+
+irq_stub_0:
+    push 32
+    jmp irq_common
+
+irq_stub_1:
+    push 33
+    jmp irq_common
+
+irq_stub_2:
+    push 34
+    jmp irq_common
+
+irq_stub_3:
+    push 35
+    jmp irq_common
+
+irq_stub_4:
+    push 36
+    jmp irq_common
+
+irq_stub_5:
+    push 37
+    jmp irq_common
+
+irq_stub_6:
+    push 38
+    jmp irq_common
+
+irq_stub_7:
+    push 39
+    jmp irq_common
+
+irq_stub_8:
+    push 40
+    jmp irq_common
+
+irq_stub_9:
+    push 41
+    jmp irq_common
+
+irq_stub_10:
+    push 42
+    jmp irq_common
+
+irq_stub_11:
+    push 43
+    jmp irq_common
+
+irq_stub_12:
+    push 44
+    jmp irq_common
+
+irq_stub_13:
+    push 45
+    jmp irq_common
+
+irq_stub_14:
+    push 46
+    jmp irq_common
+
+irq_stub_15:
+    push 47
+    jmp irq_common

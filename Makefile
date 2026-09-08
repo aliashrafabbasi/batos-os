@@ -26,7 +26,10 @@ C_SOURCES = \
     kernel/arch/x86_64/idt.c \
     kernel/arch/x86_64/pmm.c \
     kernel/arch/x86_64/tss.c \
-    kernel/arch/x86_64/vmm.c
+    kernel/arch/x86_64/vmm.c \
+    kernel/arch/x86_64/pic.c \
+    kernel/arch/x86_64/irq.c \
+    kernel/arch/x86_64/pit.c
 
 
 ASM_SOURCES = \
