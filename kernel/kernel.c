@@ -1116,6 +1116,76 @@ void kernel_main(void)
         serial_write_string(
             "ACPI RSDP: VERIFIED\n"
         );
+
+        serial_write_string(
+            "\nACPI ROOT TABLE DISCOVERY\n"
+        );
+
+        if (acpi_root_table_is_xsdt())
+        {
+            serial_write_string(
+                "ACPI ROOT TYPE: XSDT\n"
+            );
+        }
+        else
+        {
+            serial_write_string(
+                "ACPI ROOT TYPE: RSDT\n"
+            );
+        }
+
+        serial_write_string(
+            "ACPI ROOT ADDRESS: "
+        );
+
+        serial_write_hex(
+            acpi_get_root_table_address()
+        );
+
+        serial_write_string(
+            "\n"
+        );
+
+        serial_write_string(
+            "ACPI ROOT TABLE COUNT: "
+        );
+
+        serial_write_hex(
+            (uint64_t)acpi_get_root_table_count()
+        );
+
+        serial_write_string(
+            "\n"
+        );
+
+        if (acpi_get_madt_address() != 0)
+        {
+            serial_write_string(
+                "ACPI MADT: FOUND\n"
+            );
+
+            serial_write_string(
+                "ACPI MADT ADDRESS: "
+            );
+
+            serial_write_hex(
+                acpi_get_madt_address()
+            );
+
+            serial_write_string(
+                "\n"
+            );
+        }
+        else
+        {
+            serial_write_string(
+                "ACPI MADT: NOT FOUND\n"
+            );
+        }
+
+        serial_write_string(
+            "ACPI ROOT TABLE DISCOVERY: VERIFIED\n"
+        );
     }
     else
     {

@@ -352,3 +352,60 @@ uint64_t pmm_get_hhdm_offset(void)
 {
     return hhdm_offset;
 }
+
+int pmm_is_physical_range_valid(
+    uint64_t physical,
+    uint64_t length
+)
+{
+    if (length == 0)
+        return 0;
+
+    if (!limine_memmap_request.response)
+        return 0;
+
+    /*
+     * Validate physical + length without unsigned overflow.
+     */
+    if (physical > UINT64_MAX - length)
+        return 0;
+
+    uint64_t range_end =
+        physical + length;
+
+    for (uint64_t i = 0;
+         i < limine_memmap_request.response->entry_count;
+         i++)
+    {
+        struct limine_memmap_entry *entry =
+            limine_memmap_request.response->entries[i];
+
+        if (entry == 0)
+            continue;
+
+        if (entry->length == 0)
+            continue;
+
+        /*
+         * Ignore malformed memory-map entries whose
+         * base + length would overflow.
+         */
+        if (entry->base > UINT64_MAX - entry->length)
+            continue;
+
+        uint64_t entry_end =
+            entry->base + entry->length;
+
+        /*
+         * The complete requested range must be contained
+         * inside one physical memory-map entry.
+         */
+        if (physical >= entry->base &&
+            range_end <= entry_end)
+        {
+            return 1;
+        }
+    }
+
+    return 0;
+}

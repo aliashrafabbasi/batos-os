@@ -15,4 +15,9 @@ uint64_t pmm_get_bitmap_physical(void);
 uint64_t pmm_get_bitmap_size(void);
 uint64_t pmm_get_hhdm_offset(void);
 
+int pmm_is_physical_range_valid(
+    uint64_t physical,
+    uint64_t length
+);
+
 #endif
