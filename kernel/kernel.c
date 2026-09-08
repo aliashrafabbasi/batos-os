@@ -3051,6 +3051,321 @@ void kernel_main(void)
     );
 
     /* --------------------------------------------------------
+       STAGE 3: MASKED IOAPIC REDIRECTION PROGRAMMING
+       --------------------------------------------------------
+
+       Program the already-verified IRQ0 route:
+
+           IRQ0 -> GSI2 -> IOAPIC0 -> REDIR[2]
+
+       The entry is deliberately kept MASKED.
+       This stage verifies only redirection programming and
+       exact hardware readback. Interrupt delivery is NOT
+       enabled or migrated here.
+       -------------------------------------------------------- */
+
+    serial_write_string(
+        "IOAPIC STAGE 3: MASKED REDIRECTION START\n"
+    );
+
+    uint32_t stage3_ioapic_index =
+        gsi_irq0_route.ioapic_index;
+
+    uint8_t stage3_redirection_index =
+        (uint8_t)(
+            gsi_irq0_route.ioapic_redirection_index
+        );
+
+    uint8_t stage3_lapic_id =
+        (uint8_t)(lapic_id >> 24);
+
+    /*
+     * Construct the complete 64-bit redirection entry.
+     *
+     * Vector:
+     *     bits 7:0 = 0x50
+     *
+     * Delivery mode:
+     *     bits 10:8 = Fixed
+     *
+     * Destination mode:
+     *     bit 11 = Physical
+     *
+     * Polarity:
+     *     bit 13 = Active High
+     *
+     * Trigger:
+     *     bit 15 = Edge
+     *
+     * Mask:
+     *     bit 16 = MASKED
+     *
+     * Destination:
+     *     bits 63:56 = current LAPIC ID
+     */
+    uint64_t stage3_expected =
+        IOAPIC_STAGE3_TEST_VECTOR |
+        IOAPIC_REDIR_DELIVERY_FIXED |
+        IOAPIC_REDIR_MASKED |
+        ((uint64_t)stage3_lapic_id << 56);
+
+    serial_write_string(
+        "IOAPIC STAGE 3 ROUTE: IRQ0 -> GSI2 -> IOAPIC="
+    );
+
+    serial_write_hex(
+        (uint64_t)stage3_ioapic_index
+    );
+
+    serial_write_string(
+        " REDIR="
+    );
+
+    serial_write_hex(
+        (uint64_t)stage3_redirection_index
+    );
+
+    serial_write_string("\n");
+
+    serial_write_string(
+        "IOAPIC STAGE 3 VECTOR: "
+    );
+
+    serial_write_hex(
+        (uint64_t)IOAPIC_STAGE3_TEST_VECTOR
+    );
+
+    serial_write_string("\n");
+
+    serial_write_string(
+        "IOAPIC STAGE 3 LAPIC DESTINATION: "
+    );
+
+    serial_write_hex(
+        (uint64_t)stage3_lapic_id
+    );
+
+    serial_write_string("\n");
+
+    serial_write_string(
+        "IOAPIC STAGE 3 EXPECTED: "
+    );
+
+    serial_write_hex(
+        stage3_expected
+    );
+
+    serial_write_string("\n");
+
+    /*
+     * The expected value explicitly contains MASKED=1.
+     * Verify that before touching hardware.
+     */
+    if ((stage3_expected & IOAPIC_REDIR_MASKED) == 0)
+    {
+        serial_write_string(
+            "IOAPIC STAGE 3 MASK: FAILED\n"
+        );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    serial_write_string(
+        "IOAPIC STAGE 3 MASK: PRESERVED\n"
+    );
+
+    /*
+     * Program the entry.
+     *
+     * ioapic_write_redirection_at() writes the HIGH dword
+     * first and the LOW dword second.
+     *
+     * The LOW dword contains MASKED=1, so interrupt delivery
+     * remains disabled after programming.
+     */
+    int stage3_write_result =
+        ioapic_write_redirection_at(
+            stage3_ioapic_index,
+            stage3_redirection_index,
+            stage3_expected
+        );
+
+    if (stage3_write_result != 0)
+    {
+        serial_write_string(
+            "IOAPIC STAGE 3 WRITE: FAILED\n"
+        );
+
+        serial_write_string(
+            "IOAPIC ERROR: "
+        );
+
+        serial_write_hex(
+            (uint64_t)(uint32_t)(-stage3_write_result)
+        );
+
+        serial_write_string("\n");
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    serial_write_string(
+        "IOAPIC STAGE 3 WRITE: OK\n"
+    );
+
+    /*
+     * Read the complete entry back from hardware.
+     */
+    uint64_t stage3_actual = 0;
+
+    int stage3_read_result =
+        ioapic_read_redirection_at(
+            stage3_ioapic_index,
+            stage3_redirection_index,
+            &stage3_actual
+        );
+
+    if (stage3_read_result != 0)
+    {
+        serial_write_string(
+            "IOAPIC STAGE 3 READBACK: FAILED\n"
+        );
+
+        serial_write_string(
+            "IOAPIC ERROR: "
+        );
+
+        serial_write_hex(
+            (uint64_t)(uint32_t)(-stage3_read_result)
+        );
+
+        serial_write_string("\n");
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    serial_write_string(
+        "IOAPIC STAGE 3 ACTUAL: "
+    );
+
+    serial_write_hex(
+        stage3_actual
+    );
+
+    serial_write_string("\n");
+
+    /*
+     * Exact 64-bit comparison.
+     */
+    if (stage3_actual != stage3_expected)
+    {
+        serial_write_string(
+            "IOAPIC STAGE 3 READBACK: FAILED\n"
+        );
+
+        serial_write_string(
+            "IOAPIC EXPECTED: "
+        );
+
+        serial_write_hex(
+            stage3_expected
+        );
+
+        serial_write_string("\n");
+
+        serial_write_string(
+            "IOAPIC ACTUAL: "
+        );
+
+        serial_write_hex(
+            stage3_actual
+        );
+
+        serial_write_string("\n");
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    /*
+     * Independently verify the hardware readback still has
+     * the MASKED bit set.
+     */
+    if ((stage3_actual & IOAPIC_REDIR_MASKED) == 0)
+    {
+        serial_write_string(
+            "IOAPIC STAGE 3 MASK READBACK: FAILED\n"
+        );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    serial_write_string(
+        "IOAPIC STAGE 3 READBACK: EXACT MATCH\n"
+    );
+
+    serial_write_string(
+        "IOAPIC STAGE 3 MASK READBACK: VERIFIED\n"
+    );
+
+    serial_write_string(
+        "IOAPIC STAGE 3 INTERRUPT DELIVERY: DISABLED\n"
+    );
+
+    serial_write_string(
+        "IOAPIC REDIRECTION: VERIFIED\n"
+    );
+
+    /* --------------------------------------------------------
        HARDWARE IRQ / TIMER BRING-UP
        -------------------------------------------------------- */
 

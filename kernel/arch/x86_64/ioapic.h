@@ -13,6 +13,12 @@
 #define IOAPIC_REDIR_BASE   0x10U
 
 /*
+ * Stage 3 uses a dedicated vector while the IOAPIC
+ * redirection entry remains masked.
+ */
+#define IOAPIC_STAGE3_TEST_VECTOR 0x50U
+
+/*
  * Redirection-table entry bits.
  */
 #define IOAPIC_REDIR_MASKED       (1ULL << 16)
