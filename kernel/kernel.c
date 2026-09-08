@@ -10,6 +10,7 @@
 #include "kernel/arch/x86_64/pic.h"
 #include "kernel/arch/x86_64/irq.h"
 #include "kernel/arch/x86_64/pit.h"
+#include "kernel/arch/x86_64/acpi.h"
 
 /* ============================================================
    LIMINE FRAMEBUFFER REQUEST
@@ -1060,6 +1061,87 @@ void kernel_main(void)
     serial_write_string(
         "PMM READY\n"
     );
+
+    /* --------------------------------------------------------
+       ACPI RSDP DISCOVERY
+       -------------------------------------------------------- */
+
+    serial_write_string(
+        "\nACPI DISCOVERY START\n"
+    );
+
+    int acpi_result = acpi_init();
+
+    if (acpi_result == 0)
+    {
+        serial_write_string(
+            "RSDP: FOUND\n"
+        );
+
+        serial_write_string(
+            "RSDP SIGNATURE: OK\n"
+        );
+
+        serial_write_string(
+            "RSDP REVISION: "
+        );
+
+        serial_write_hex(
+            (uint64_t)acpi_get_rsdp_revision()
+        );
+
+        serial_write_string("\n");
+
+        serial_write_string(
+            "RSDP ADDRESS: "
+        );
+
+        serial_write_hex(
+            acpi_get_rsdp_address()
+        );
+
+        serial_write_string("\n");
+
+        serial_write_string(
+            "RSDP BASE CHECKSUM: OK\n"
+        );
+
+        if (acpi_get_rsdp_revision() >= 2)
+        {
+            serial_write_string(
+                "RSDP EXTENDED CHECKSUM: OK\n"
+            );
+        }
+
+        serial_write_string(
+            "ACPI RSDP: VERIFIED\n"
+        );
+    }
+    else
+    {
+        serial_write_string(
+            "ACPI RSDP: FAILED\n"
+        );
+
+        serial_write_string(
+            "ACPI ERROR CODE: "
+        );
+
+        serial_write_hex(
+            (uint64_t)(uint32_t)(-acpi_result)
+        );
+
+        serial_write_string("\n");
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile ("cli\nhlt");
+        }
+    }
 
     /* --------------------------------------------------------
        FRAME ALLOCATOR TEST

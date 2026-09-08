@@ -29,7 +29,8 @@ C_SOURCES = \
     kernel/arch/x86_64/vmm.c \
     kernel/arch/x86_64/pic.c \
     kernel/arch/x86_64/irq.c \
-    kernel/arch/x86_64/pit.c
+    kernel/arch/x86_64/pit.c \
+    kernel/arch/x86_64/acpi.c
 
 
 ASM_SOURCES = \
