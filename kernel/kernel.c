@@ -14,6 +14,7 @@
 #include "kernel/arch/x86_64/gsi.h"
 #include "kernel/arch/x86_64/pit.h"
 #include "kernel/arch/x86_64/time.h"
+#include "kernel/arch/x86_64/timer.h"
 #include "kernel/arch/x86_64/acpi.h"
 
 /* ============================================================
@@ -4075,6 +4076,381 @@ void kernel_main(void)
             "HARDWARE INTERRUPTS: FAILED\n"
         );
     }
+
+    /* --------------------------------------------------------
+       TIMER-1 SOFTWARE TIMER SUBSYSTEM
+       -------------------------------------------------------- */
+
+    serial_write_string(
+        "TIMER-1 TEST START\n"
+    );
+
+    struct timer one_shot_timer;
+    struct timer periodic_timer;
+
+    timer_init(&one_shot_timer);
+    timer_init(&periodic_timer);
+
+    /*
+     * Basic initialization.
+     */
+    if (timer_get_deadline(&one_shot_timer) != 0 ||
+        timer_is_expired(&one_shot_timer) != 0)
+    {
+        serial_write_string(
+            "TIMER-1 INIT: FAILED\n"
+        );
+
+        serial_write_string("CPU HALTED\n");
+
+        for (;;)
+        {
+            __asm__ volatile ("cli\nhlt");
+        }
+    }
+
+    serial_write_string(
+        "TIMER-1 INIT: VERIFIED\n"
+    );
+
+    /*
+     * Zero-delay one-shot must be rejected.
+     */
+    if (timer_start(&one_shot_timer, 0) == 0)
+    {
+        serial_write_string(
+            "TIMER-1 ZERO DELAY: FAILED\n"
+        );
+
+        serial_write_string("CPU HALTED\n");
+
+        for (;;)
+        {
+            __asm__ volatile ("cli\nhlt");
+        }
+    }
+
+    /*
+     * Start a real one-shot timer for 5 PIT timekeeping ticks.
+     */
+    uint64_t one_shot_start =
+        time_get_ticks();
+
+    if (timer_start(&one_shot_timer, 5) != 0)
+    {
+        serial_write_string(
+            "TIMER-1 ONE-SHOT START: FAILED\n"
+        );
+
+        serial_write_string("CPU HALTED\n");
+
+        for (;;)
+        {
+            __asm__ volatile ("cli\nhlt");
+        }
+    }
+
+    uint64_t one_shot_deadline =
+        timer_get_deadline(&one_shot_timer);
+
+    if (one_shot_deadline !=
+        one_shot_start + 5)
+    {
+        serial_write_string(
+            "TIMER-1 ONE-SHOT DEADLINE: FAILED\n"
+        );
+
+        serial_write_string("CPU HALTED\n");
+
+        for (;;)
+        {
+            __asm__ volatile ("cli\nhlt");
+        }
+    }
+
+    /*
+     * It must not be expired immediately after starting.
+     */
+    if (timer_is_expired(&one_shot_timer) != 0)
+    {
+        serial_write_string(
+            "TIMER-1 PRE-DEADLINE: FAILED\n"
+        );
+
+        serial_write_string("CPU HALTED\n");
+
+        for (;;)
+        {
+            __asm__ volatile ("cli\nhlt");
+        }
+    }
+
+    serial_write_string(
+        "TIMER-1 ONE-SHOT START: VERIFIED\n"
+    );
+
+    /*
+     * Wait until the real timekeeping clock reaches
+     * the one-shot deadline.
+     */
+    while (time_get_ticks() < one_shot_deadline)
+    {
+        __asm__ volatile (
+            "sti\n"
+            "hlt\n"
+            "cli"
+            :
+            :
+            : "memory"
+        );
+    }
+
+    if (timer_is_expired(&one_shot_timer) == 0)
+    {
+        serial_write_string(
+            "TIMER-1 EXPIRY: FAILED\n"
+        );
+
+        serial_write_string("CPU HALTED\n");
+
+        for (;;)
+        {
+            __asm__ volatile ("cli\nhlt");
+        }
+    }
+
+    serial_write_string(
+        "TIMER-1 EXPIRY: VERIFIED\n"
+    );
+
+    /*
+     * Rearming a one-shot timer completes/deactivates it.
+     */
+    if (timer_rearm(&one_shot_timer) != 0 ||
+        timer_is_expired(&one_shot_timer) != 0)
+    {
+        serial_write_string(
+            "TIMER-1 ONE-SHOT REARM: FAILED\n"
+        );
+
+        serial_write_string("CPU HALTED\n");
+
+        for (;;)
+        {
+            __asm__ volatile ("cli\nhlt");
+        }
+    }
+
+    serial_write_string(
+        "TIMER-1 ONE-SHOT REARM: VERIFIED\n"
+    );
+
+    /*
+     * Periodic timer: first deadline must be one period
+     * after the current clock.
+     */
+    uint64_t periodic_start =
+        time_get_ticks();
+
+    if (timer_start_periodic(&periodic_timer, 3) != 0)
+    {
+        serial_write_string(
+            "TIMER-1 PERIODIC START: FAILED\n"
+        );
+
+        serial_write_string("CPU HALTED\n");
+
+        for (;;)
+        {
+            __asm__ volatile ("cli\nhlt");
+        }
+    }
+
+    uint64_t periodic_deadline_1 =
+        timer_get_deadline(&periodic_timer);
+
+    if (periodic_deadline_1 !=
+        periodic_start + 3)
+    {
+        serial_write_string(
+            "TIMER-1 PERIODIC DEADLINE: FAILED\n"
+        );
+
+        serial_write_string("CPU HALTED\n");
+
+        for (;;)
+        {
+            __asm__ volatile ("cli\nhlt");
+        }
+    }
+
+    serial_write_string(
+        "TIMER-1 PERIODIC START: VERIFIED\n"
+    );
+
+    /*
+     * Wait for first periodic expiry.
+     */
+    while (time_get_ticks() < periodic_deadline_1)
+    {
+        __asm__ volatile (
+            "sti\n"
+            "hlt\n"
+            "cli"
+            :
+            :
+            : "memory"
+        );
+    }
+
+    if (timer_is_expired(&periodic_timer) == 0)
+    {
+        serial_write_string(
+            "TIMER-1 PERIODIC EXPIRY: FAILED\n"
+        );
+
+        serial_write_string("CPU HALTED\n");
+
+        for (;;)
+        {
+            __asm__ volatile ("cli\nhlt");
+        }
+    }
+
+    /*
+     * Rearm must advance exactly one period.
+     */
+    if (timer_rearm(&periodic_timer) != 0)
+    {
+        serial_write_string(
+            "TIMER-1 PERIODIC REARM: FAILED\n"
+        );
+
+        serial_write_string("CPU HALTED\n");
+
+        for (;;)
+        {
+            __asm__ volatile ("cli\nhlt");
+        }
+    }
+
+    uint64_t periodic_deadline_2 =
+        timer_get_deadline(&periodic_timer);
+
+    if (periodic_deadline_2 !=
+        periodic_deadline_1 + 3 ||
+        timer_is_expired(&periodic_timer) != 0)
+    {
+        serial_write_string(
+            "TIMER-1 PERIODIC REARM: FAILED\n"
+        );
+
+        serial_write_string("CPU HALTED\n");
+
+        for (;;)
+        {
+            __asm__ volatile ("cli\nhlt");
+        }
+    }
+
+    serial_write_string(
+        "TIMER-1 PERIODIC REARM: VERIFIED\n"
+    );
+
+    /*
+     * Verify a second periodic cycle.
+     */
+    while (time_get_ticks() < periodic_deadline_2)
+    {
+        __asm__ volatile (
+            "sti\n"
+            "hlt\n"
+            "cli"
+            :
+            :
+            : "memory"
+        );
+    }
+
+    if (timer_is_expired(&periodic_timer) == 0)
+    {
+        serial_write_string(
+            "TIMER-1 PERIODIC SECOND EXPIRY: FAILED\n"
+        );
+
+        serial_write_string("CPU HALTED\n");
+
+        for (;;)
+        {
+            __asm__ volatile ("cli\nhlt");
+        }
+    }
+
+    if (timer_rearm(&periodic_timer) != 0)
+    {
+        serial_write_string(
+            "TIMER-1 PERIODIC SECOND REARM: FAILED\n"
+        );
+
+        serial_write_string("CPU HALTED\n");
+
+        for (;;)
+        {
+            __asm__ volatile ("cli\nhlt");
+        }
+    }
+
+    serial_write_string(
+        "TIMER-1 PERIODIC SECOND CYCLE: VERIFIED\n"
+    );
+
+    /*
+     * Cancellation must make an active timer non-expiring.
+     */
+    timer_cancel(&periodic_timer);
+
+    if (timer_is_expired(&periodic_timer) != 0)
+    {
+        serial_write_string(
+            "TIMER-1 CANCEL: FAILED\n"
+        );
+
+        serial_write_string("CPU HALTED\n");
+
+        for (;;)
+        {
+            __asm__ volatile ("cli\nhlt");
+        }
+    }
+
+    serial_write_string(
+        "TIMER-1 CANCEL: VERIFIED\n"
+    );
+
+    /*
+     * Zero-period periodic timer must be rejected.
+     */
+    if (timer_start_periodic(&periodic_timer, 0) == 0)
+    {
+        serial_write_string(
+            "TIMER-1 ZERO PERIOD: FAILED\n"
+        );
+
+        serial_write_string("CPU HALTED\n");
+
+        for (;;)
+        {
+            __asm__ volatile ("cli\nhlt");
+        }
+    }
+
+    serial_write_string(
+        "TIMER-1 INVALID INPUTS: VERIFIED\n"
+    );
+
+    serial_write_string(
+        "TIMER-1 SOFTWARE TIMER: VERIFIED\n"
+    );
 
     /* --------------------------------------------------------
        REAL LAPIC TIMER INTERRUPT DELIVERY
