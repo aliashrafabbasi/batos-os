@@ -2953,6 +2953,47 @@ void kernel_main(void)
         "LAPIC TIMER BRING-UP: VERIFIED\n"
     );
 
+    /*
+     * Stop and reset the masked LAPIC timer after the
+     * controlled countdown test. This guarantees that
+     * later calibration starts from a known timer state.
+     */
+    int lapic_timer_stop_result =
+        lapic_timer_stop();
+
+    if (lapic_timer_stop_result != 0)
+    {
+        serial_write_string(
+            "LAPIC TIMER STOP: FAILED\n"
+        );
+
+        serial_write_string(
+            "LAPIC TIMER STOP ERROR: "
+        );
+
+        serial_write_hex(
+            (uint64_t)(uint32_t)(-lapic_timer_stop_result)
+        );
+
+        serial_write_string("\n");
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    serial_write_string(
+        "LAPIC TIMER STOP: VERIFIED\n"
+    );
+
     /* --------------------------------------------------------
        I/O APIC BRING-UP
        -------------------------------------------------------- */

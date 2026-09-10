@@ -41,11 +41,26 @@ void lapic_timer_interrupt(void);
 uint64_t lapic_timer_get_interrupt_count(void);
 
 /*
+ * Read the current LAPIC timer countdown value.
+ *
+ * The returned value is the architectural countdown
+ * register value at the time of the read.
+ */
+uint32_t lapic_timer_get_current_count(void);
+
+/*
  * Configure the LAPIC timer for controlled bring-up.
  *
  * The timer remains masked until a later explicit
  * enable step.
  */
 int lapic_timer_init(uint32_t initial_count);
+
+/*
+ * Stop the LAPIC timer and clear its current countdown.
+ *
+ * The timer remains masked after this operation.
+ */
+int lapic_timer_stop(void);
 
 #endif

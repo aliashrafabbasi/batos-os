@@ -243,7 +243,48 @@ int lapic_timer_init(uint32_t initial_count)
     return 0;
 }
 
+int lapic_timer_stop(void)
+{
+    if (lapic_base == 0)
+    {
+        return -1;
+    }
+
+    /*
+     * Mask the timer before clearing its countdown so
+     * no LAPIC timer interrupt can be delivered.
+     */
+    uint32_t lvt =
+        lapic_read(
+            LAPIC_REG_LVT_TIMER
+        );
+
+    lvt |= LAPIC_LVT_TIMER_MASK;
+
+    lapic_write(
+        LAPIC_REG_LVT_TIMER,
+        lvt
+    );
+
+    /*
+     * Writing zero stops the countdown.
+     */
+    lapic_write(
+        LAPIC_REG_TIMER_INITIAL,
+        0
+    );
+
+    return 0;
+}
+
 uint64_t lapic_timer_get_interrupt_count(void)
 {
     return lapic_timer_interrupt_count;
+}
+
+uint32_t lapic_timer_get_current_count(void)
+{
+    return lapic_read(
+        LAPIC_REG_TIMER_CURRENT
+    );
 }
