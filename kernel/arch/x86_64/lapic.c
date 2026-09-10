@@ -1,6 +1,7 @@
 #include "lapic.h"
 #include "acpi.h"
 #include "pmm.h"
+#include "clock_event.h"
 
 #define LAPIC_PAGE_SIZE 4096ULL
 
@@ -186,6 +187,8 @@ void lapic_timer_interrupt(void)
 {
     lapic_timer_interrupt_count++;
 
+    clock_event_notify();
+
     lapic_eoi();
 }
 
@@ -287,4 +290,120 @@ uint32_t lapic_timer_get_current_count(void)
     return lapic_read(
         LAPIC_REG_TIMER_CURRENT
     );
+}
+
+/*
+ * Mask or unmask LAPIC timer interrupt delivery.
+ *
+ * This operation changes only the LVT mask bit.
+ * Timer mode, vector, divider, and initial count
+ * remain unchanged.
+ */
+int lapic_timer_set_masked(int masked)
+{
+    if (lapic_base == 0)
+    {
+        return -1;
+    }
+
+    uint32_t lvt =
+        lapic_read(
+            LAPIC_REG_LVT_TIMER
+        );
+
+    if (masked)
+    {
+        lvt |= LAPIC_LVT_TIMER_MASK;
+    }
+    else
+    {
+        lvt &= ~LAPIC_LVT_TIMER_MASK;
+    }
+
+    lapic_write(
+        LAPIC_REG_LVT_TIMER,
+        lvt
+    );
+
+    uint32_t readback =
+        lapic_read(
+            LAPIC_REG_LVT_TIMER
+        );
+
+    if (masked)
+    {
+        if ((readback & LAPIC_LVT_TIMER_MASK) == 0)
+        {
+            return -2;
+        }
+    }
+    else
+    {
+        if ((readback & LAPIC_LVT_TIMER_MASK) != 0)
+        {
+            return -3;
+        }
+    }
+
+    return 0;
+}
+
+/*
+ * Configure the LAPIC timer in periodic mode.
+ *
+ * The timer remains masked after this operation.
+ * The caller explicitly enables interrupt delivery
+ * only after the reload value and interrupt path
+ * have been verified.
+ */
+int lapic_timer_configure_periodic(uint32_t initial_count)
+{
+    if (lapic_base == 0)
+    {
+        return -1;
+    }
+
+    if (initial_count == 0)
+    {
+        return -2;
+    }
+
+    /*
+     * Stop any previous countdown before programming the
+     * periodic configuration.
+     */
+    if (lapic_timer_stop() != 0)
+    {
+        return -3;
+    }
+
+    /*
+     * Keep the calibrated divider at divide-by-16.
+     */
+    lapic_write(
+        LAPIC_REG_TIMER_DIVIDE,
+        0x3U
+    );
+
+    /*
+     * Fixed delivery, vector 0xF0, periodic mode,
+     * masked until the caller explicitly enables it.
+     */
+    lapic_write(
+        LAPIC_REG_LVT_TIMER,
+        LAPIC_LVT_TIMER_VECTOR |
+        LAPIC_LVT_TIMER_PERIODIC |
+        LAPIC_LVT_TIMER_MASK
+    );
+
+    /*
+     * Loading the initial count starts the periodic
+     * countdown, but the LVT remains masked.
+     */
+    lapic_write(
+        LAPIC_REG_TIMER_INITIAL,
+        initial_count
+    );
+
+    return 0;
 }

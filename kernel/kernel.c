@@ -4155,6 +4155,533 @@ void kernel_main(void)
        TIMER-1 SOFTWARE TIMER SUBSYSTEM
        -------------------------------------------------------- */
 
+
+    /* --------------------------------------------------------
+       TIMER-4: LAPIC TIMER FREQUENCY CALIBRATION
+       --------------------------------------------------------
+
+       The PIT remains the temporary reference clock.
+
+       Calibration interval:
+           PIT = 100 Hz
+           20 PIT ticks = 200 ms
+
+       LAPIC timer:
+           one-shot
+           masked
+           divide-by-16
+           initial count = 0xFFFFFFFF
+
+       The LAPIC counter decrement over the known PIT
+       interval gives the measured LAPIC timer frequency.
+       -------------------------------------------------------- */
+
+    serial_write_string(
+        "LAPIC TIMER CALIBRATION START\n"
+    );
+
+    /*
+     * Ensure the previous LAPIC timer bring-up countdown
+     * cannot participate in calibration.
+     */
+    if (lapic_timer_stop() != 0)
+    {
+        serial_write_string(
+            "LAPIC TIMER CALIBRATION STOP: FAILED\n"
+        );
+
+        serial_write_string("CPU HALTED\n");
+
+        for (;;)
+        {
+            __asm__ volatile ("cli\nhlt");
+        }
+    }
+
+    const uint32_t lapic_calibration_initial =
+        0xFFFFFFFFU;
+
+    /*
+     * Configure a fresh masked one-shot countdown.
+     * Interrupt delivery remains disabled during the
+     * measurement interval.
+     */
+    if (lapic_timer_init(
+            lapic_calibration_initial
+        ) != 0)
+    {
+        serial_write_string(
+            "LAPIC TIMER CALIBRATION INIT: FAILED\n"
+        );
+
+        serial_write_string("CPU HALTED\n");
+
+        for (;;)
+        {
+            __asm__ volatile ("cli\nhlt");
+        }
+    }
+
+    uint32_t lapic_calibration_start_count =
+        lapic_timer_get_current_count();
+
+    uint64_t lapic_calibration_start_ticks =
+        irq_get_ticks();
+
+    serial_write_string(
+        "LAPIC CALIBRATION START COUNT: "
+    );
+    serial_write_hex(
+        lapic_calibration_start_count
+    );
+    serial_write_string("\n");
+
+    serial_write_string(
+        "LAPIC CALIBRATION START PIT TICKS: "
+    );
+    serial_write_hex(
+        lapic_calibration_start_ticks
+    );
+    serial_write_string("\n");
+
+    /*
+     * Enable only the already-proven PIT reference path.
+     * The LAPIC timer remains masked.
+     */
+    __asm__ volatile (
+        "sti"
+        :
+        :
+        : "memory"
+    );
+
+    const uint64_t lapic_calibration_reference_ticks =
+        20;
+
+    while (
+        irq_get_ticks() <
+        lapic_calibration_start_ticks +
+        lapic_calibration_reference_ticks
+    )
+    {
+        __asm__ volatile (
+            "hlt"
+            :
+            :
+            : "memory"
+        );
+    }
+
+    /*
+     * Stop interrupt delivery before reading the final
+     * calibration state.
+     */
+    __asm__ volatile (
+        "cli"
+        :
+        :
+        : "memory"
+    );
+
+    uint32_t lapic_calibration_end_count =
+        lapic_timer_get_current_count();
+
+    uint64_t lapic_calibration_end_ticks =
+        irq_get_ticks();
+
+    serial_write_string(
+        "LAPIC CALIBRATION END COUNT: "
+    );
+    serial_write_hex(
+        lapic_calibration_end_count
+    );
+    serial_write_string("\n");
+
+    serial_write_string(
+        "LAPIC CALIBRATION END PIT TICKS: "
+    );
+    serial_write_hex(
+        lapic_calibration_end_ticks
+    );
+    serial_write_string("\n");
+
+    /*
+     * The timer must still be counting down. Reaching zero
+     * would mean the selected calibration interval was too
+     * long for the chosen initial count.
+     */
+    if (lapic_calibration_end_count == 0 ||
+        lapic_calibration_end_count >=
+            lapic_calibration_start_count ||
+        lapic_calibration_end_ticks <=
+            lapic_calibration_start_ticks)
+    {
+        serial_write_string(
+            "LAPIC TIMER CALIBRATION: FAILED\n"
+        );
+
+        lapic_timer_stop();
+
+        serial_write_string("CPU HALTED\n");
+
+        for (;;)
+        {
+            __asm__ volatile ("cli\nhlt");
+        }
+    }
+
+    uint64_t lapic_calibration_elapsed_count =
+        (uint64_t)lapic_calibration_start_count -
+        (uint64_t)lapic_calibration_end_count;
+
+    uint64_t lapic_calibration_elapsed_pit_ticks =
+        lapic_calibration_end_ticks -
+        lapic_calibration_start_ticks;
+
+    /*
+     * PIT reference frequency is exactly the configured
+     * 100 Hz clock-event frequency.
+     *
+     * Measured LAPIC frequency:
+     *
+     *     delta_count * PIT_HZ
+     *     -------------------
+     *       elapsed_ticks
+     */
+    const uint64_t lapic_calibration_pit_hz =
+        100ULL;
+
+    uint64_t lapic_timer_frequency =
+        (
+            lapic_calibration_elapsed_count *
+            lapic_calibration_pit_hz
+        ) /
+        lapic_calibration_elapsed_pit_ticks;
+
+    if (lapic_timer_frequency == 0 ||
+        lapic_timer_frequency > 0xFFFFFFFFULL)
+    {
+        serial_write_string(
+            "LAPIC TIMER FREQUENCY: INVALID\n"
+        );
+
+        lapic_timer_stop();
+
+        serial_write_string("CPU HALTED\n");
+
+        for (;;)
+        {
+            __asm__ volatile ("cli\nhlt");
+        }
+    }
+
+    /*
+     * Calculate the reload required for a 100 Hz periodic
+     * LAPIC clock event.
+     *
+     * Rounded rather than truncated.
+     */
+    uint64_t lapic_timer_reload =
+        (
+            lapic_timer_frequency +
+            50ULL
+        ) /
+        100ULL;
+
+    if (lapic_timer_reload == 0 ||
+        lapic_timer_reload > 0xFFFFFFFFULL)
+    {
+        serial_write_string(
+            "LAPIC TIMER RELOAD: INVALID\n"
+        );
+
+        lapic_timer_stop();
+
+        serial_write_string("CPU HALTED\n");
+
+        for (;;)
+        {
+            __asm__ volatile ("cli\nhlt");
+        }
+    }
+
+    serial_write_string(
+        "LAPIC CALIBRATION ELAPSED COUNT: "
+    );
+    serial_write_hex(
+        lapic_calibration_elapsed_count
+    );
+    serial_write_string("\n");
+
+    serial_write_string(
+        "LAPIC CALIBRATION ELAPSED PIT TICKS: "
+    );
+    serial_write_hex(
+        lapic_calibration_elapsed_pit_ticks
+    );
+    serial_write_string("\n");
+
+    serial_write_string(
+        "LAPIC TIMER MEASURED FREQUENCY: "
+    );
+    serial_write_hex(
+        lapic_timer_frequency
+    );
+    serial_write_string("\n");
+
+    serial_write_string(
+        "LAPIC TIMER 100HZ RELOAD: "
+    );
+    serial_write_hex(
+        lapic_timer_reload
+    );
+    serial_write_string("\n");
+
+    /*
+     * Calibration is complete. Do not switch the clock-event
+     * source yet; that is the next controlled step.
+     */
+    if (lapic_timer_stop() != 0)
+    {
+        serial_write_string(
+            "LAPIC TIMER CALIBRATION CLEANUP: FAILED\n"
+        );
+
+        serial_write_string("CPU HALTED\n");
+
+        for (;;)
+        {
+            __asm__ volatile ("cli\nhlt");
+        }
+    }
+
+    serial_write_string(
+        "LAPIC TIMER CALIBRATION: VERIFIED\n"
+    );
+
+    /*
+     * --------------------------------------------------------
+     * TIMER-4: LAPIC TIMER CLOCK-SOURCE MIGRATION
+     *
+     * The calibrated LAPIC timer becomes the active system
+     * clock-event source at 100 Hz.
+     *
+     * The PIT hardware is kept intact for now, but its IRQ0
+     * IOAPIC delivery is masked so it can no longer generate
+     * system clock events.
+     *
+     * Ordering:
+     *
+     *   1. CLI
+     *   2. Configure LAPIC periodic timer while masked
+     *   3. Switch clock-event ownership to LAPIC
+     *   4. Mask PIT IRQ0 at IOAPIC
+     *   5. Verify PIT IRQ0 is masked
+     *   6. Unmask LAPIC timer
+     *   7. STI
+     *
+     * No PIT removal or hardware shutdown is performed here.
+     * --------------------------------------------------------
+     */
+
+    serial_write_string(
+        "TIMER-4 LAPIC CLOCK MIGRATION START\n"
+    );
+
+    __asm__ volatile (
+        "cli"
+        :
+        :
+        : "memory"
+    );
+
+    /*
+     * Program the calibrated LAPIC timer in periodic mode.
+     * The timer remains masked until the complete transition
+     * has been verified.
+     */
+    if (lapic_timer_configure_periodic(
+            (uint32_t)lapic_timer_reload
+        ) != 0)
+    {
+        serial_write_string(
+            "TIMER-4 LAPIC PERIODIC CONFIG: FAILED\n"
+        );
+
+        serial_write_string("CPU HALTED\n");
+
+        for (;;)
+        {
+            __asm__ volatile ("cli\nhlt");
+        }
+    }
+
+    serial_write_string(
+        "TIMER-4 LAPIC PERIODIC CONFIG: VERIFIED\n"
+    );
+
+    /*
+     * Switch the clock-event abstraction to the calibrated
+     * LAPIC source. Timekeeping ticks are intentionally
+     * preserved across the source transition.
+     */
+    if (clock_event_init(
+            CLOCK_EVENT_SOURCE_LAPIC,
+            100
+        ) != 0)
+    {
+        serial_write_string(
+            "TIMER-4 CLOCK SOURCE SWITCH: FAILED\n"
+        );
+
+        serial_write_string("CPU HALTED\n");
+
+        for (;;)
+        {
+            __asm__ volatile ("cli\nhlt");
+        }
+    }
+
+    if (clock_event_get_source() !=
+            CLOCK_EVENT_SOURCE_LAPIC ||
+        clock_event_get_frequency() != 100)
+    {
+        serial_write_string(
+            "TIMER-4 CLOCK SOURCE VERIFY: FAILED\n"
+        );
+
+        serial_write_string("CPU HALTED\n");
+
+        for (;;)
+        {
+            __asm__ volatile ("cli\nhlt");
+        }
+    }
+
+    serial_write_string(
+        "TIMER-4 CLOCK SOURCE: LAPIC 100HZ\n"
+    );
+
+    /*
+     * Mask PIT IRQ0 at the IOAPIC.
+     *
+     * Preserve the complete existing routing entry and change
+     * only the mask bit. The ACPI-resolved GSI route is reused.
+     */
+    uint64_t timer4_pit_redirection = 0;
+
+    if (ioapic_read_redirection_at(
+            gsi_irq0_route.ioapic_index,
+            (uint8_t)gsi_irq0_route.ioapic_redirection_index,
+            &timer4_pit_redirection
+        ) != 0)
+    {
+        serial_write_string(
+            "TIMER-4 PIT IRQ0 READ: FAILED\n"
+        );
+
+        serial_write_string("CPU HALTED\n");
+
+        for (;;)
+        {
+            __asm__ volatile ("cli\nhlt");
+        }
+    }
+
+    timer4_pit_redirection |= IOAPIC_REDIR_MASKED;
+
+    if (ioapic_write_redirection_at(
+            gsi_irq0_route.ioapic_index,
+            (uint8_t)gsi_irq0_route.ioapic_redirection_index,
+            timer4_pit_redirection
+        ) != 0)
+    {
+        serial_write_string(
+            "TIMER-4 PIT IRQ0 MASK: FAILED\n"
+        );
+
+        serial_write_string("CPU HALTED\n");
+
+        for (;;)
+        {
+            __asm__ volatile ("cli\nhlt");
+        }
+    }
+
+    uint64_t timer4_pit_readback = 0;
+
+    if (ioapic_read_redirection_at(
+            gsi_irq0_route.ioapic_index,
+            (uint8_t)gsi_irq0_route.ioapic_redirection_index,
+            &timer4_pit_readback
+        ) != 0)
+    {
+        serial_write_string(
+            "TIMER-4 PIT IRQ0 READBACK: FAILED\n"
+        );
+
+        serial_write_string("CPU HALTED\n");
+
+        for (;;)
+        {
+            __asm__ volatile ("cli\nhlt");
+        }
+    }
+
+    if ((timer4_pit_readback & IOAPIC_REDIR_MASKED) == 0)
+    {
+        serial_write_string(
+            "TIMER-4 PIT IRQ0 MASK READBACK: FAILED\n"
+        );
+
+        serial_write_string("CPU HALTED\n");
+
+        for (;;)
+        {
+            __asm__ volatile ("cli\nhlt");
+        }
+    }
+
+    serial_write_string(
+        "TIMER-4 PIT IRQ0: MASKED\n"
+    );
+
+    /*
+     * Enable the already-programmed periodic LAPIC timer.
+     */
+    if (lapic_timer_set_masked(0) != 0)
+    {
+        serial_write_string(
+            "TIMER-4 LAPIC TIMER UNMASK: FAILED\n"
+        );
+
+        serial_write_string("CPU HALTED\n");
+
+        for (;;)
+        {
+            __asm__ volatile ("cli\nhlt");
+        }
+    }
+
+    serial_write_string(
+        "TIMER-4 LAPIC TIMER: UNMASKED\n"
+    );
+
+    __asm__ volatile (
+        "sti"
+        :
+        :
+        : "memory"
+    );
+
+    serial_write_string(
+        "TIMER-4 LAPIC CLOCK SOURCE: ACTIVE\n"
+    );
+
+    serial_write_string(
+        "TIMER-4 LAPIC CLOCK MIGRATION: ARMED\n"
+    );
+
     serial_write_string(
         "TIMER-1 TEST START\n"
     );
@@ -4910,75 +5437,69 @@ void kernel_main(void)
     );
 
     /* --------------------------------------------------------
-       REAL LAPIC TIMER INTERRUPT DELIVERY
+       TIMER-4 LAPIC CLOCK-SOURCE VERIFICATION
        -------------------------------------------------------- */
 
     serial_write_string(
-        "LAPIC TIMER INTERRUPT TEST START\n"
+        "TIMER-4 LAPIC CLOCK VERIFICATION START\n"
     );
-
-    uint64_t lapic_timer_count_before =
-        lapic_timer_get_interrupt_count();
-
-    serial_write_string(
-        "LAPIC TIMER INTERRUPT COUNT BEFORE: "
-    );
-
-    serial_write_hex(
-        lapic_timer_count_before
-    );
-
-    serial_write_string("\n");
 
     /*
-     * Keep the timer masked while programming a fresh
-     * one-shot countdown.
+     * The LAPIC timer is already configured by Timer-4 as
+     * a periodic 100 Hz clock source.
+     *
+     * Do not reprogram, stop, or mask it here.
+     * This test observes the live clock path.
      */
-    uint32_t lapic_timer_test_lvt =
+
+    uint32_t timer4_lvt =
         lapic_read(
             LAPIC_REG_LVT_TIMER
         );
 
-    lapic_write(
-        LAPIC_REG_LVT_TIMER,
-        lapic_timer_test_lvt |
-        LAPIC_LVT_TIMER_MASK
-    );
-
-    /*
-     * Use a fresh countdown for interrupt-delivery
-     * verification. Do not reuse the earlier countdown.
-     */
-    const uint32_t lapic_timer_test_initial =
-        0x01000000U;
-
-    lapic_write(
-        LAPIC_REG_TIMER_INITIAL,
-        lapic_timer_test_initial
-    );
-
-    /*
-     * Preserve vector 0xF0 and one-shot mode while
-     * removing only the mask bit.
-     */
-    uint32_t lapic_timer_test_enabled_lvt =
-        LAPIC_LVT_TIMER_VECTOR;
-
-    lapic_write(
-        LAPIC_REG_LVT_TIMER,
-        lapic_timer_test_enabled_lvt
-    );
-
-    uint32_t lapic_timer_test_readback =
-        lapic_read(
-            LAPIC_REG_LVT_TIMER
-        );
-
-    if (lapic_timer_test_readback !=
-        lapic_timer_test_enabled_lvt)
+    if ((timer4_lvt & 0xFFU) !=
+        LAPIC_LVT_TIMER_VECTOR)
     {
         serial_write_string(
-            "LAPIC TIMER INTERRUPT LVT: FAILED\n"
+            "TIMER-4 LAPIC LVT VECTOR: FAILED\n"
+        );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    if ((timer4_lvt & LAPIC_LVT_TIMER_PERIODIC) == 0)
+    {
+        serial_write_string(
+            "TIMER-4 LAPIC MODE: NOT PERIODIC\n"
+        );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    if ((timer4_lvt & LAPIC_LVT_TIMER_MASK) != 0)
+    {
+        serial_write_string(
+            "TIMER-4 LAPIC MASK: FAILED\n"
         );
 
         serial_write_string(
@@ -4995,16 +5516,46 @@ void kernel_main(void)
     }
 
     serial_write_string(
-        "LAPIC TIMER INTERRUPT LVT: VERIFIED\n"
+        "TIMER-4 LAPIC LVT: PERIODIC + UNMASKED\n"
     );
+
+    if (clock_event_get_source() !=
+        CLOCK_EVENT_SOURCE_LAPIC ||
+        clock_event_get_frequency() != 100)
+    {
+        serial_write_string(
+            "TIMER-4 CLOCK-EVENT STATE: FAILED\n"
+        );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
 
     serial_write_string(
-        "LAPIC TIMER INTERRUPT ENABLED\n"
+        "TIMER-4 CLOCK-EVENT SOURCE: LAPIC 100HZ\n"
     );
 
+    uint64_t timer4_interrupts_before =
+        lapic_timer_get_interrupt_count();
+
+    uint64_t timer4_clock_events_before =
+        clock_event_get_count();
+
+    uint64_t timer4_time_ticks_before =
+        time_get_ticks();
+
     /*
-     * Enable maskable interrupts and sleep until the
-     * dedicated LAPIC timer interrupt wakes the CPU.
+     * Enable interrupts and wait for the live periodic
+     * LAPIC timer to deliver at least one clock event.
      */
     __asm__ volatile (
         "sti"
@@ -5014,7 +5565,7 @@ void kernel_main(void)
     );
 
     while (lapic_timer_get_interrupt_count() ==
-           lapic_timer_count_before)
+           timer4_interrupts_before)
     {
         __asm__ volatile (
             "hlt"
@@ -5025,7 +5576,8 @@ void kernel_main(void)
     }
 
     /*
-     * Stop maskable interrupts before checking the result.
+     * Stop maskable interrupts while validating the
+     * resulting clock/time state.
      */
     __asm__ volatile (
         "cli"
@@ -5034,30 +5586,60 @@ void kernel_main(void)
         : "memory"
     );
 
-    uint64_t lapic_timer_count_after =
+    uint64_t timer4_interrupts_after =
         lapic_timer_get_interrupt_count();
 
-    serial_write_string(
-        "LAPIC TIMER INTERRUPT COUNT AFTER: "
-    );
+    uint64_t timer4_clock_events_after =
+        clock_event_get_count();
 
-    serial_write_hex(
-        lapic_timer_count_after
-    );
+    uint64_t timer4_time_ticks_after =
+        time_get_ticks();
 
-    serial_write_string("\n");
-
-    if (lapic_timer_count_after >
-        lapic_timer_count_before)
+    if (timer4_interrupts_after <=
+        timer4_interrupts_before)
     {
         serial_write_string(
-            "LAPIC TIMER INTERRUPT: VERIFIED\n"
+            "TIMER-4 LAPIC INTERRUPT PROGRESSION: FAILED\n"
         );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
     }
-    else
+
+    if (timer4_clock_events_after <=
+        timer4_clock_events_before)
     {
         serial_write_string(
-            "LAPIC TIMER INTERRUPT: FAILED\n"
+            "TIMER-4 CLOCK-EVENT PROGRESSION: FAILED\n"
+        );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    if (timer4_time_ticks_after <=
+        timer4_time_ticks_before)
+    {
+        serial_write_string(
+            "TIMER-4 TIMEKEEPING PROGRESSION: FAILED\n"
         );
 
         serial_write_string(
@@ -5074,27 +5656,23 @@ void kernel_main(void)
     }
 
     /*
-     * Leave the LAPIC timer masked after this primitive
-     * delivery test. Future timekeeping code will own
-     * the timer lifecycle.
+     * Re-read the LVT after real interrupt delivery.
+     * The periodic clock source must remain active.
      */
-    lapic_write(
-        LAPIC_REG_LVT_TIMER,
-        LAPIC_LVT_TIMER_VECTOR |
-        LAPIC_LVT_TIMER_MASK
-    );
-
-    uint32_t lapic_timer_final_lvt =
+    uint32_t timer4_final_lvt =
         lapic_read(
             LAPIC_REG_LVT_TIMER
         );
 
-    if (lapic_timer_final_lvt !=
-        (LAPIC_LVT_TIMER_VECTOR |
-         LAPIC_LVT_TIMER_MASK))
+    if ((timer4_final_lvt & 0xFFU) !=
+            LAPIC_LVT_TIMER_VECTOR ||
+        (timer4_final_lvt &
+            LAPIC_LVT_TIMER_PERIODIC) == 0 ||
+        (timer4_final_lvt &
+            LAPIC_LVT_TIMER_MASK) != 0)
     {
         serial_write_string(
-            "LAPIC TIMER INTERRUPT CLEANUP: FAILED\n"
+            "TIMER-4 LAPIC FINAL STATE: FAILED\n"
         );
 
         serial_write_string(
@@ -5111,11 +5689,23 @@ void kernel_main(void)
     }
 
     serial_write_string(
-        "LAPIC TIMER INTERRUPT MASKED\n"
+        "TIMER-4 LAPIC INTERRUPT PROGRESSION: VERIFIED\n"
     );
 
     serial_write_string(
-        "LAPIC TIMER INTERRUPT DELIVERY: VERIFIED\n"
+        "TIMER-4 CLOCK-EVENT PROGRESSION: VERIFIED\n"
+    );
+
+    serial_write_string(
+        "TIMER-4 TIMEKEEPING PROGRESSION: VERIFIED\n"
+    );
+
+    serial_write_string(
+        "TIMER-4 LAPIC FINAL STATE: PERIODIC + UNMASKED\n"
+    );
+
+    serial_write_string(
+        "TIMER-4 LAPIC CLOCK SOURCE: VERIFIED\n"
     );
 
     /* --------------------------------------------------------

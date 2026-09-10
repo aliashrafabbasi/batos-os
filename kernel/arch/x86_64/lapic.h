@@ -63,4 +63,21 @@ int lapic_timer_init(uint32_t initial_count);
  */
 int lapic_timer_stop(void);
 
+/*
+ * Mask or unmask LAPIC timer interrupt delivery.
+ *
+ * The timer configuration itself is unchanged.
+ */
+int lapic_timer_set_masked(int masked);
+
+/*
+ * Configure the LAPIC timer in periodic mode.
+ *
+ * The timer remains masked after this operation.
+ * The caller explicitly enables interrupt delivery
+ * only after the reload value and interrupt path
+ * have been verified.
+ */
+int lapic_timer_configure_periodic(uint32_t initial_count);
+
 #endif
