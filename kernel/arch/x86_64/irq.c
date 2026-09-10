@@ -1,6 +1,7 @@
 #include "irq.h"
 #include "pic.h"
 #include "lapic.h"
+#include "time.h"
 
 static irq_handler_t irq_handlers[IRQ_COUNT];
 
@@ -13,6 +14,7 @@ static void irq0_timer_handler(struct irq_frame *frame)
     (void)frame;
 
     irq_ticks++;
+    time_tick();
 }
 
 void irq_init(void)

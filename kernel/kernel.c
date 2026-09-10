@@ -13,6 +13,7 @@
 #include "kernel/arch/x86_64/ioapic.h"
 #include "kernel/arch/x86_64/gsi.h"
 #include "kernel/arch/x86_64/pit.h"
+#include "kernel/arch/x86_64/time.h"
 #include "kernel/arch/x86_64/acpi.h"
 
 /* ============================================================
@@ -3635,6 +3636,14 @@ void kernel_main(void)
      */
     pit_init(100);
 
+    /*
+     * Initialize the system timekeeping layer.
+     *
+     * The initial reference source is the PIT at 100 Hz.
+     * Hardware IRQ0 will advance the timekeeping tick.
+     */
+    time_init(100);
+
     /* --------------------------------------------------------
        STAGE 5: CONTROLLED IRQ0 MIGRATION TO LAPIC
        --------------------------------------------------------
@@ -3961,10 +3970,24 @@ void kernel_main(void)
     );
 
     uint64_t start_ticks = irq_get_ticks();
+    uint64_t start_time_ticks = time_get_ticks();
+    uint64_t start_uptime_ms = time_get_uptime_ms();
 
     serial_write_string(
         "IRQ0 TEST WAITING\n"
     );
+
+    serial_write_string(
+        "TIMEKEEPING START TICKS: "
+    );
+    serial_write_hex(start_time_ticks);
+    serial_write_string("\n");
+
+    serial_write_string(
+        "TIMEKEEPING START UPTIME MS: "
+    );
+    serial_write_hex(start_uptime_ms);
+    serial_write_string("\n");
 
     /*
      * Enable maskable hardware interrupts only after
@@ -4003,6 +4026,8 @@ void kernel_main(void)
     );
 
     uint64_t end_ticks = irq_get_ticks();
+    uint64_t end_time_ticks = time_get_ticks();
+    uint64_t end_uptime_ms = time_get_uptime_ms();
 
     serial_write_string(
         "IRQ0 TEST START TICKS: "
@@ -4016,7 +4041,21 @@ void kernel_main(void)
     serial_write_hex(end_ticks);
     serial_write_string("\n");
 
-    if (end_ticks >= start_ticks + 100)
+    serial_write_string(
+        "TIMEKEEPING END TICKS: "
+    );
+    serial_write_hex(end_time_ticks);
+    serial_write_string("\n");
+
+    serial_write_string(
+        "TIMEKEEPING END UPTIME MS: "
+    );
+    serial_write_hex(end_uptime_ms);
+    serial_write_string("\n");
+
+    if (end_ticks >= start_ticks + 100 &&
+        end_time_ticks >= start_time_ticks + 100 &&
+        end_uptime_ms >= start_uptime_ms + 1000)
     {
         serial_write_string(
             "IRQ0 TIMER: VERIFIED\n"
