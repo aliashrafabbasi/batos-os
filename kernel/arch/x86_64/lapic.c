@@ -171,3 +171,71 @@ void lapic_eoi(void)
         0
     );
 }
+
+/*
+ * Handle a Local APIC timer interrupt.
+ *
+ * The LAPIC timer uses its own dedicated vector
+ * and therefore does not pass through irq_dispatch().
+ *
+ * Timekeeping and scheduler logic will be layered
+ * above this primitive later.
+ */
+void lapic_timer_interrupt(void)
+{
+    lapic_eoi();
+}
+
+/*
+ * Configure the LAPIC timer for controlled bring-up.
+ *
+ * The timer is configured as a masked, one-shot timer.
+ * Interrupt delivery will be enabled by a later explicit
+ * step after countdown behavior has been verified.
+ */
+int lapic_timer_init(uint32_t initial_count)
+{
+    if (lapic_base == 0)
+    {
+        return -1;
+    }
+
+    if (initial_count == 0)
+    {
+        return -2;
+    }
+
+    /*
+     * Divide the LAPIC timer clock by 16.
+     *
+     * LAPIC divide configuration encoding 0x3
+     * corresponds to divide-by-16.
+     */
+    lapic_write(
+        LAPIC_REG_TIMER_DIVIDE,
+        0x3U
+    );
+
+    /*
+     * Configure fixed delivery mode, vector 0xF0,
+     * one-shot mode, and keep the timer masked.
+     */
+    lapic_write(
+        LAPIC_REG_LVT_TIMER,
+        LAPIC_LVT_TIMER_VECTOR |
+        LAPIC_LVT_TIMER_MASK
+    );
+
+    /*
+     * Writing the initial count starts the timer.
+     *
+     * The timer remains masked, so no timer interrupt
+     * can be delivered during this controlled phase.
+     */
+    lapic_write(
+        LAPIC_REG_TIMER_INITIAL,
+        initial_count
+    );
+
+    return 0;
+}

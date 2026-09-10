@@ -2737,6 +2737,219 @@ void kernel_main(void)
     );
 
     /* --------------------------------------------------------
+       LAPIC TIMER BRING-UP
+       -------------------------------------------------------- */
+
+    serial_write_string(
+        "LAPIC TIMER BRING-UP START\n"
+    );
+
+    /*
+     * Configure a masked, one-shot LAPIC timer.
+     *
+     * Interrupt delivery remains disabled. The initial
+     * count is intentionally large so the countdown can
+     * be observed before the timer reaches zero.
+     */
+    const uint32_t lapic_timer_initial =
+        0xFFFFFFFFU;
+
+    int lapic_timer_result =
+        lapic_timer_init(
+            lapic_timer_initial
+        );
+
+    if (lapic_timer_result != 0)
+    {
+        serial_write_string(
+            "LAPIC TIMER: INITIALIZATION FAILED\n"
+        );
+
+        serial_write_string(
+            "LAPIC TIMER ERROR: "
+        );
+
+        serial_write_hex(
+            (uint64_t)(uint32_t)(-lapic_timer_result)
+        );
+
+        serial_write_string("\n");
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    uint32_t lapic_timer_lvt =
+        lapic_read(
+            LAPIC_REG_LVT_TIMER
+        );
+
+    uint32_t lapic_timer_divide =
+        lapic_read(
+            LAPIC_REG_TIMER_DIVIDE
+        );
+
+    uint32_t lapic_timer_current_before =
+        lapic_read(
+            LAPIC_REG_TIMER_CURRENT
+        );
+
+    serial_write_string(
+        "LAPIC TIMER LVT: "
+    );
+
+    serial_write_hex(
+        (uint64_t)lapic_timer_lvt
+    );
+
+    serial_write_string("\n");
+
+    serial_write_string(
+        "LAPIC TIMER DIVIDE: "
+    );
+
+    serial_write_hex(
+        (uint64_t)lapic_timer_divide
+    );
+
+    serial_write_string("\n");
+
+    serial_write_string(
+        "LAPIC TIMER CURRENT BEFORE: "
+    );
+
+    serial_write_hex(
+        (uint64_t)lapic_timer_current_before
+    );
+
+    serial_write_string("\n");
+
+    /*
+     * Give the hardware timer a short interval to count down.
+     *
+     * Interrupts remain disabled, so this test observes
+     * only the LAPIC timer counter and cannot enter the
+     * LAPIC timer interrupt handler.
+     */
+    for (volatile uint32_t delay = 0;
+         delay < 1000000U;
+         delay++)
+    {
+        __asm__ volatile ("pause");
+    }
+
+    uint32_t lapic_timer_current_after =
+        lapic_read(
+            LAPIC_REG_TIMER_CURRENT
+        );
+
+    serial_write_string(
+        "LAPIC TIMER CURRENT AFTER: "
+    );
+
+    serial_write_hex(
+        (uint64_t)lapic_timer_current_after
+    );
+
+    serial_write_string("\n");
+
+    /*
+     * Verify:
+     *
+     *   1. Timer vector is 0xF0.
+     *   2. Timer remains masked.
+     *   3. Periodic mode is disabled.
+     *   4. Divide configuration is divide-by-16.
+     *   5. Current count decreased.
+     */
+    uint32_t expected_lapic_timer_lvt =
+        LAPIC_LVT_TIMER_VECTOR |
+        LAPIC_LVT_TIMER_MASK;
+
+    if (lapic_timer_lvt != expected_lapic_timer_lvt)
+    {
+        serial_write_string(
+            "LAPIC TIMER LVT CONFIG: FAILED\n"
+        );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    if (lapic_timer_divide != 0x3U)
+    {
+        serial_write_string(
+            "LAPIC TIMER DIVIDE CONFIG: FAILED\n"
+        );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    if (lapic_timer_current_after >=
+        lapic_timer_current_before)
+    {
+        serial_write_string(
+            "LAPIC TIMER COUNTDOWN: FAILED\n"
+        );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    serial_write_string(
+        "LAPIC TIMER CONFIG: VERIFIED\n"
+    );
+
+    serial_write_string(
+        "LAPIC TIMER COUNTDOWN: VERIFIED\n"
+    );
+
+    serial_write_string(
+        "LAPIC TIMER INTERRUPT: MASKED\n"
+    );
+
+    serial_write_string(
+        "LAPIC TIMER BRING-UP: VERIFIED\n"
+    );
+
+    /* --------------------------------------------------------
        I/O APIC BRING-UP
        -------------------------------------------------------- */
 

@@ -152,6 +152,16 @@ void idt_init(void)
     idt_set_gate(47, (uint64_t)irq_stub_15);
 
     /*
+     * LAPIC timer interrupts use dedicated vector 0xF0.
+     * This vector is intentionally outside the external
+     * IRQ range (0x20-0x2F).
+     */
+    idt_set_gate(
+        0xF0,
+        (uint64_t)lapic_timer_stub
+    );
+
+    /*
      * LAPIC spurious interrupts use vector 0xFF.
      * Install the dedicated handler before LAPIC SVR
      * software-enable can expose that vector.

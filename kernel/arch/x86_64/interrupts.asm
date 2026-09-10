@@ -462,9 +462,11 @@ global irq_stub_12
 global irq_stub_13
 global irq_stub_14
 global irq_stub_15
+global lapic_timer_stub
 global lapic_spurious_stub
 
 extern irq_dispatch
+extern lapic_timer_interrupt
 
 
 irq_common:
@@ -582,6 +584,66 @@ irq_stub_14:
 irq_stub_15:
     push 47
     jmp irq_common
+
+
+; ============================================================
+; LAPIC timer interrupt
+;
+; Vector 0xF0 is a Local APIC timer vector.
+; It is deliberately kept outside the external IRQ
+; dispatcher range (0x20-0x2F).
+;
+; CPU frame before our pushes:
+;
+;   [rsp + 0]  = RIP
+;   [rsp + 8]  = CS
+;   [rsp + 16] = RFLAGS
+;
+; ============================================================
+
+lapic_timer_stub:
+    cld
+
+    push rax
+    push rbx
+    push rcx
+    push rdx
+    push rbp
+    push rsi
+    push rdi
+    push r8
+    push r9
+    push r10
+    push r11
+    push r12
+    push r13
+    push r14
+    push r15
+
+    mov rbx, rsp
+    and rsp, -16
+
+    call lapic_timer_interrupt
+
+    mov rsp, rbx
+
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop r11
+    pop r10
+    pop r9
+    pop r8
+    pop rdi
+    pop rsi
+    pop rbp
+    pop rdx
+    pop rcx
+    pop rbx
+    pop rax
+
+    iretq
 
 
 ; ============================================================
