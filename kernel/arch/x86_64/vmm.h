@@ -46,6 +46,25 @@ int vmm_map_page(
 );
 
 /*
+ * Unmap one 4 KiB virtual page.
+ *
+ * Returns:
+ *      0  = unmapped successfully
+ *     -1  = failure
+ *
+ * If physical_address is non-NULL, the physical frame
+ * previously mapped by the PTE is returned through it.
+ *
+ * The physical frame is NOT freed by this function.
+ * PMM ownership remains separate from VMM mapping lifecycle.
+ */
+int vmm_unmap_page(
+    uint64_t pml4_physical,
+    uint64_t virtual_address,
+    uint64_t *physical_address
+);
+
+/*
  * Walk the BATOS page tables and translate a virtual
  * address into its corresponding physical address.
  *

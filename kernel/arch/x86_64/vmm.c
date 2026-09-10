@@ -827,6 +827,117 @@ int vmm_map_page(
 }
 
 /*
+ * Unmap one 4 KiB virtual page.
+ *
+ * This removes only the final PTE mapping.
+ *
+ * Intermediate page tables are intentionally retained.
+ * Reclaiming empty page-table pages is a separate lifecycle
+ * operation and is not part of this primitive.
+ *
+ * The physical frame is returned to the caller when requested,
+ * but is never freed here because PMM owns physical-frame
+ * lifecycle.
+ */
+int vmm_unmap_page(
+    uint64_t pml4_physical,
+    uint64_t virtual_address,
+    uint64_t *physical_address
+)
+{
+    if (pml4_physical == 0)
+        return -1;
+
+    if (virtual_address &
+        (VMM_PAGE_SIZE - 1))
+        return -1;
+
+    uint64_t *pml4 =
+        physical_to_virtual(
+            pml4_physical
+        );
+
+    uint64_t pml4_entry =
+        pml4[pml4_index(virtual_address)];
+
+    if (!(pml4_entry & VMM_PRESENT))
+        return -1;
+
+    if (pml4_entry & VMM_HUGE)
+        return -1;
+
+    uint64_t *pdpt =
+        physical_to_virtual(
+            pml4_entry & ADDRESS_MASK
+        );
+
+    uint64_t pdpt_entry =
+        pdpt[pdpt_index(virtual_address)];
+
+    if (!(pdpt_entry & VMM_PRESENT))
+        return -1;
+
+    if (pdpt_entry & VMM_HUGE)
+        return -1;
+
+    uint64_t *pd =
+        physical_to_virtual(
+            pdpt_entry & ADDRESS_MASK
+        );
+
+    uint64_t pd_entry =
+        pd[pd_index(virtual_address)];
+
+    if (!(pd_entry & VMM_PRESENT))
+        return -1;
+
+    if (pd_entry & VMM_HUGE)
+        return -1;
+
+    uint64_t *pt =
+        physical_to_virtual(
+            pd_entry & ADDRESS_MASK
+        );
+
+    uint64_t index =
+        pt_index(virtual_address);
+
+    uint64_t pte =
+        pt[index];
+
+    if (!(pte & VMM_PRESENT))
+        return -1;
+
+    uint64_t mapped_physical =
+        pte & ADDRESS_MASK;
+
+    /*
+     * Clear the leaf mapping.
+     */
+    pt[index] = 0;
+
+    /*
+     * If this address space is currently active,
+     * invalidate the CPU's cached translation.
+     */
+    if (active_address_space_pml4 ==
+        pml4_physical)
+    {
+        __asm__ volatile (
+            "invlpg (%0)"
+            :
+            : "r"(virtual_address)
+            : "memory"
+        );
+    }
+
+    if (physical_address != NULL)
+        *physical_address = mapped_physical;
+
+    return 0;
+}
+
+/*
  * Software page-table walker.
  *
  * Walks:

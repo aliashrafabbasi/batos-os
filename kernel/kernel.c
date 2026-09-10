@@ -2465,6 +2465,428 @@ void kernel_main(void)
     }
 
     /* --------------------------------------------------------
+       VMM-2F PAGE UNMAP + FRAME LIFECYCLE TEST
+       -------------------------------------------------------- */
+
+    serial_write_string(
+        "\nVMM-2F PAGE UNMAP + FRAME LIFECYCLE TEST\n"
+    );
+
+    /*
+     * Use a dedicated virtual address for the unmap test.
+     *
+     * This must not overlap BATOS's existing VMM-2A mapping
+     * at 0x40000000.
+     */
+    uint64_t unmap_virtual =
+        0x0000000040001000ULL;
+
+    uint64_t unmap_check_physical = 0;
+
+    /*
+     * First prove that the candidate address is actually
+     * unmapped in the active BATOS address space.
+     */
+    int initial_translate =
+        vmm_translate(
+            pml4,
+            unmap_virtual,
+            &unmap_check_physical
+        );
+
+    serial_write_string(
+        "INITIAL TRANSLATION RESULT: "
+    );
+
+    serial_write_hex(
+        (uint64_t)(uint32_t)initial_translate
+    );
+
+    serial_write_string("\n");
+
+    if (initial_translate == 0)
+    {
+        serial_write_string(
+            "VMM-2F: TEST ADDRESS ALREADY MAPPED\n"
+        );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    serial_write_string(
+        "VMM-2F: TEST ADDRESS IS UNMAPPED\n"
+    );
+
+    /*
+     * Record PMM state before acquiring the test frame.
+     */
+    uint64_t free_frames_before =
+        pmm_get_free_frames();
+
+    serial_write_string(
+        "PMM FREE FRAMES BEFORE ALLOCATION: "
+    );
+
+    serial_write_hex(
+        free_frames_before
+    );
+
+    serial_write_string("\n");
+
+    /*
+     * Acquire one real physical frame from PMM.
+     */
+    uint64_t unmap_frame =
+        pmm_alloc_frame();
+
+    if (unmap_frame == 0)
+    {
+        serial_write_string(
+            "VMM-2F: FRAME ALLOCATION FAILED\n"
+        );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    serial_write_string(
+        "VMM-2F TEST FRAME: "
+    );
+
+    serial_write_hex(
+        unmap_frame
+    );
+
+    serial_write_string("\n");
+
+    /*
+     * Map the dedicated virtual address.
+     */
+    int unmap_map_result =
+        vmm_map_page(
+            pml4,
+            unmap_virtual,
+            unmap_frame,
+            VMM_WRITABLE
+        );
+
+    serial_write_string(
+        "UNMAP TEST MAP RESULT: "
+    );
+
+    serial_write_hex(
+        (uint64_t)(uint32_t)unmap_map_result
+    );
+
+    serial_write_string("\n");
+
+    if (unmap_map_result != 0)
+    {
+        pmm_free_frame(unmap_frame);
+
+        serial_write_string(
+            "VMM-2F: MAP FAILED\n"
+        );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    /*
+     * Verify software translation after mapping.
+     */
+    uint64_t mapped_physical = 0;
+
+    int mapped_translate_result =
+        vmm_translate(
+            pml4,
+            unmap_virtual,
+            &mapped_physical
+        );
+
+    if (mapped_translate_result != 0 ||
+        mapped_physical != unmap_frame)
+    {
+        uint64_t cleanup_physical = 0;
+
+        if (vmm_unmap_page(
+                pml4,
+                unmap_virtual,
+                &cleanup_physical
+            ) == 0)
+        {
+            pmm_free_frame(cleanup_physical);
+        }
+        else
+        {
+            pmm_free_frame(unmap_frame);
+        }
+
+        serial_write_string(
+            "VMM-2F: MAP TRANSLATION FAILED\n"
+        );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    serial_write_string(
+        "VMM-2F: MAP TRANSLATION VERIFIED\n"
+    );
+
+    /*
+     * Perform a REAL CPU memory access through the new mapping.
+     */
+    volatile uint64_t *unmap_test_address =
+        (volatile uint64_t *)unmap_virtual;
+
+    uint64_t unmap_test_pattern =
+        0x4241544F532D3246ULL;
+
+    *unmap_test_address =
+        unmap_test_pattern;
+
+    uint64_t unmap_readback =
+        *unmap_test_address;
+
+    serial_write_string(
+        "VMM-2F CPU WRITE/READ: "
+    );
+
+    serial_write_hex(
+        unmap_readback
+    );
+
+    serial_write_string("\n");
+
+    if (unmap_readback != unmap_test_pattern)
+    {
+        uint64_t cleanup_physical = 0;
+
+        if (vmm_unmap_page(
+                pml4,
+                unmap_virtual,
+                &cleanup_physical
+            ) == 0)
+        {
+            pmm_free_frame(cleanup_physical);
+        }
+        else
+        {
+            pmm_free_frame(unmap_frame);
+        }
+
+        serial_write_string(
+            "VMM-2F: CPU MEMORY ACCESS FAILED\n"
+        );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    serial_write_string(
+        "VMM-2F: CPU MEMORY ACCESS VERIFIED\n"
+    );
+
+    /*
+     * Remove only the virtual mapping.
+     *
+     * vmm_unmap_page() returns the physical frame but does
+     * not free it. PMM remains responsible for frame lifetime.
+     */
+    uint64_t unmapped_physical = 0;
+
+    int unmap_result =
+        vmm_unmap_page(
+            pml4,
+            unmap_virtual,
+            &unmapped_physical
+        );
+
+    serial_write_string(
+        "VMM UNMAP RESULT: "
+    );
+
+    serial_write_hex(
+        (uint64_t)(uint32_t)unmap_result
+    );
+
+    serial_write_string("\n");
+
+    serial_write_string(
+        "UNMAPPED PHYSICAL: "
+    );
+
+    serial_write_hex(
+        unmapped_physical
+    );
+
+    serial_write_string("\n");
+
+    if (unmap_result != 0 ||
+        unmapped_physical != unmap_frame)
+    {
+        serial_write_string(
+            "VMM-2F: UNMAP FAILED\n"
+        );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    /*
+     * The virtual mapping must now be absent.
+     *
+     * We deliberately do NOT dereference unmap_virtual here:
+     * a page fault would be expected and page-fault recovery
+     * is a separate kernel milestone.
+     */
+    uint64_t after_unmap_physical = 0;
+
+    int after_unmap_result =
+        vmm_translate(
+            pml4,
+            unmap_virtual,
+            &after_unmap_physical
+        );
+
+    serial_write_string(
+        "AFTER UNMAP TRANSLATION RESULT: "
+    );
+
+    serial_write_hex(
+        (uint64_t)(uint32_t)after_unmap_result
+    );
+
+    serial_write_string("\n");
+
+    if (after_unmap_result == 0)
+    {
+        serial_write_string(
+            "VMM-2F: TRANSLATION STILL PRESENT\n"
+        );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    serial_write_string(
+        "VMM-2F: TRANSLATION REMOVED\n"
+    );
+
+    /*
+     * Return the physical frame to PMM.
+     */
+    pmm_free_frame(
+        unmapped_physical
+    );
+
+    uint64_t free_frames_after =
+        pmm_get_free_frames();
+
+    serial_write_string(
+        "PMM FREE FRAMES AFTER RELEASE: "
+    );
+
+    serial_write_hex(
+        free_frames_after
+    );
+
+    serial_write_string("\n");
+
+    if (free_frames_after !=
+        free_frames_before)
+    {
+        serial_write_string(
+            "VMM-2F: PMM FRAME LIFECYCLE FAILED\n"
+        );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    serial_write_string(
+        "VMM-2F: PMM FRAME RELEASE VERIFIED\n"
+    );
+
+    serial_write_string(
+        "VMM-2F: PAGE UNMAP + FRAME LIFECYCLE VERIFIED\n"
+    );
+
+    /* --------------------------------------------------------
        VMM-2E HARDWARE PAGE TRANSLATION TEST
        -------------------------------------------------------- */
 
