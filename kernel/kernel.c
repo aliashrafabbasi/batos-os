@@ -4038,6 +4038,215 @@ void kernel_main(void)
     }
 
     /* --------------------------------------------------------
+       REAL LAPIC TIMER INTERRUPT DELIVERY
+       -------------------------------------------------------- */
+
+    serial_write_string(
+        "LAPIC TIMER INTERRUPT TEST START\n"
+    );
+
+    uint64_t lapic_timer_count_before =
+        lapic_timer_get_interrupt_count();
+
+    serial_write_string(
+        "LAPIC TIMER INTERRUPT COUNT BEFORE: "
+    );
+
+    serial_write_hex(
+        lapic_timer_count_before
+    );
+
+    serial_write_string("\n");
+
+    /*
+     * Keep the timer masked while programming a fresh
+     * one-shot countdown.
+     */
+    uint32_t lapic_timer_test_lvt =
+        lapic_read(
+            LAPIC_REG_LVT_TIMER
+        );
+
+    lapic_write(
+        LAPIC_REG_LVT_TIMER,
+        lapic_timer_test_lvt |
+        LAPIC_LVT_TIMER_MASK
+    );
+
+    /*
+     * Use a fresh countdown for interrupt-delivery
+     * verification. Do not reuse the earlier countdown.
+     */
+    const uint32_t lapic_timer_test_initial =
+        0x01000000U;
+
+    lapic_write(
+        LAPIC_REG_TIMER_INITIAL,
+        lapic_timer_test_initial
+    );
+
+    /*
+     * Preserve vector 0xF0 and one-shot mode while
+     * removing only the mask bit.
+     */
+    uint32_t lapic_timer_test_enabled_lvt =
+        LAPIC_LVT_TIMER_VECTOR;
+
+    lapic_write(
+        LAPIC_REG_LVT_TIMER,
+        lapic_timer_test_enabled_lvt
+    );
+
+    uint32_t lapic_timer_test_readback =
+        lapic_read(
+            LAPIC_REG_LVT_TIMER
+        );
+
+    if (lapic_timer_test_readback !=
+        lapic_timer_test_enabled_lvt)
+    {
+        serial_write_string(
+            "LAPIC TIMER INTERRUPT LVT: FAILED\n"
+        );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    serial_write_string(
+        "LAPIC TIMER INTERRUPT LVT: VERIFIED\n"
+    );
+
+    serial_write_string(
+        "LAPIC TIMER INTERRUPT ENABLED\n"
+    );
+
+    /*
+     * Enable maskable interrupts and sleep until the
+     * dedicated LAPIC timer interrupt wakes the CPU.
+     */
+    __asm__ volatile (
+        "sti"
+        :
+        :
+        : "memory"
+    );
+
+    while (lapic_timer_get_interrupt_count() ==
+           lapic_timer_count_before)
+    {
+        __asm__ volatile (
+            "hlt"
+            :
+            :
+            : "memory"
+        );
+    }
+
+    /*
+     * Stop maskable interrupts before checking the result.
+     */
+    __asm__ volatile (
+        "cli"
+        :
+        :
+        : "memory"
+    );
+
+    uint64_t lapic_timer_count_after =
+        lapic_timer_get_interrupt_count();
+
+    serial_write_string(
+        "LAPIC TIMER INTERRUPT COUNT AFTER: "
+    );
+
+    serial_write_hex(
+        lapic_timer_count_after
+    );
+
+    serial_write_string("\n");
+
+    if (lapic_timer_count_after >
+        lapic_timer_count_before)
+    {
+        serial_write_string(
+            "LAPIC TIMER INTERRUPT: VERIFIED\n"
+        );
+    }
+    else
+    {
+        serial_write_string(
+            "LAPIC TIMER INTERRUPT: FAILED\n"
+        );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    /*
+     * Leave the LAPIC timer masked after this primitive
+     * delivery test. Future timekeeping code will own
+     * the timer lifecycle.
+     */
+    lapic_write(
+        LAPIC_REG_LVT_TIMER,
+        LAPIC_LVT_TIMER_VECTOR |
+        LAPIC_LVT_TIMER_MASK
+    );
+
+    uint32_t lapic_timer_final_lvt =
+        lapic_read(
+            LAPIC_REG_LVT_TIMER
+        );
+
+    if (lapic_timer_final_lvt !=
+        (LAPIC_LVT_TIMER_VECTOR |
+         LAPIC_LVT_TIMER_MASK))
+    {
+        serial_write_string(
+            "LAPIC TIMER INTERRUPT CLEANUP: FAILED\n"
+        );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    serial_write_string(
+        "LAPIC TIMER INTERRUPT MASKED\n"
+    );
+
+    serial_write_string(
+        "LAPIC TIMER INTERRUPT DELIVERY: VERIFIED\n"
+    );
+
+    /* --------------------------------------------------------
        FINAL HALT
        -------------------------------------------------------- */
 

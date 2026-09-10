@@ -38,6 +38,8 @@ void lapic_eoi(void);
  */
 void lapic_timer_interrupt(void);
 
+uint64_t lapic_timer_get_interrupt_count(void);
+
 /*
  * Configure the LAPIC timer for controlled bring-up.
  *

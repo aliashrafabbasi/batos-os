@@ -6,6 +6,7 @@
 
 static uint64_t lapic_physical_address = 0;
 static volatile uint8_t *lapic_base = 0;
+static volatile uint64_t lapic_timer_interrupt_count = 0;
 
 static volatile uint8_t *lapic_phys_to_virt(
     uint64_t physical
@@ -183,6 +184,8 @@ void lapic_eoi(void)
  */
 void lapic_timer_interrupt(void)
 {
+    lapic_timer_interrupt_count++;
+
     lapic_eoi();
 }
 
@@ -238,4 +241,9 @@ int lapic_timer_init(uint32_t initial_count)
     );
 
     return 0;
+}
+
+uint64_t lapic_timer_get_interrupt_count(void)
+{
+    return lapic_timer_interrupt_count;
 }
