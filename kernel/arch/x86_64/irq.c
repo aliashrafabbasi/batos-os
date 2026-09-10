@@ -1,7 +1,7 @@
 #include "irq.h"
 #include "pic.h"
 #include "lapic.h"
-#include "time.h"
+#include "clock_event.h"
 
 static irq_handler_t irq_handlers[IRQ_COUNT];
 
@@ -14,7 +14,7 @@ static void irq0_timer_handler(struct irq_frame *frame)
     (void)frame;
 
     irq_ticks++;
-    time_tick();
+    clock_event_notify();
 }
 
 void irq_init(void)
@@ -28,8 +28,12 @@ void irq_init(void)
     /*
      * IRQ0 is the first real hardware interrupt used by BATOS.
      *
-     * The current live timer path remains on the legacy PIC.
-     * APIC delivery is intentionally not enabled here.
+     * The IRQ0 handler is registered here.
+     *
+     * The live timer source is currently PIT-driven, with
+     * IRQ0 delivered through the IOAPIC to the LAPIC.
+     * The clock-event abstraction sits between IRQ delivery
+     * and timekeeping.
      */
     irq_register_handler(0, irq0_timer_handler);
 }

@@ -14,6 +14,7 @@
 #include "kernel/arch/x86_64/gsi.h"
 #include "kernel/arch/x86_64/pit.h"
 #include "kernel/arch/x86_64/time.h"
+#include "kernel/arch/x86_64/clock_event.h"
 #include "kernel/arch/x86_64/timer.h"
 #include "kernel/arch/x86_64/timer_manager.h"
 #include "kernel/arch/x86_64/acpi.h"
@@ -3645,6 +3646,37 @@ void kernel_main(void)
      * Hardware IRQ0 will advance the timekeeping tick.
      */
     time_init(100);
+
+    /*
+     * Initialize the clock-event abstraction.
+     *
+     * The current hardware source remains the PIT at 100 Hz.
+     * IRQ0 delivery is routed through the IOAPIC/LAPIC path,
+     * while the clock-event layer decouples the hardware source
+     * from system timekeeping.
+     */
+    if (clock_event_init(
+            CLOCK_EVENT_SOURCE_PIT,
+            100
+        ) != 0)
+    {
+        serial_write_string(
+            "CLOCK EVENT INIT: FAILED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile ("cli\nhlt");
+        }
+    }
+
+    serial_write_string(
+        "CLOCK EVENT SOURCE: PIT\n"
+    );
+
+    serial_write_string(
+        "CLOCK EVENT: READY\n"
+    );
 
     /* --------------------------------------------------------
        STAGE 5: CONTROLLED IRQ0 MIGRATION TO LAPIC

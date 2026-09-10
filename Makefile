@@ -31,6 +31,7 @@ C_SOURCES = \
     kernel/arch/x86_64/irq.c \
     kernel/arch/x86_64/pit.c \
     kernel/arch/x86_64/time.c \
+    kernel/arch/x86_64/clock_event.c \
     kernel/arch/x86_64/timer.c \
     kernel/arch/x86_64/timer_manager.c \
     kernel/arch/x86_64/lapic.c \
