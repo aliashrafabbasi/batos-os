@@ -3024,8 +3024,378 @@ void kernel_main(void)
     );
 
     /* --------------------------------------------------------
+       HEAP-1B.1 DYNAMIC KERNEL HEAP PAGE VERIFICATION
+       -------------------------------------------------------- */
+
+    serial_write_string(
+        "\nHEAP-1B.1 DYNAMIC KERNEL PAGE TEST\n"
+    );
+
+    /*
+     * First page immediately after the current kernel image.
+     *
+     * The address was selected from the ELF kernel layout:
+     * the current kernel image ends before 0xffffffff80040000.
+     *
+     * This is only a test address for Heap-1B.1.
+     */
+    uint64_t dynamic_heap_virtual =
+        0xffffffff80040000ULL;
+
+    uint64_t dynamic_heap_physical = 0;
+
+    /*
+     * The candidate page must not already be mapped.
+     */
+    int initial_translation =
+        vmm_translate(
+            batos_pml4,
+            dynamic_heap_virtual,
+            &dynamic_heap_physical
+        );
+
+    serial_write_string(
+        "INITIAL DYNAMIC HEAP TRANSLATION: "
+    );
+
+    serial_write_hex(
+        (uint64_t)(uint32_t)initial_translation
+    );
+
+    serial_write_string("\n");
+
+    if (initial_translation == 0)
+    {
+        serial_write_string(
+            "HEAP-1B.1: CANDIDATE PAGE ALREADY MAPPED\n"
+        );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    serial_write_string(
+        "HEAP-1B.1: CANDIDATE PAGE IS UNMAPPED\n"
+    );
+
+    /*
+     * Acquire a real physical frame from PMM.
+     */
+    uint64_t dynamic_heap_frame =
+        pmm_alloc_frame();
+
+    serial_write_string(
+        "DYNAMIC HEAP TEST FRAME: "
+    );
+
+    serial_write_hex(
+        dynamic_heap_frame
+    );
+
+    serial_write_string("\n");
+
+    if (dynamic_heap_frame == 0)
+    {
+        serial_write_string(
+            "HEAP-1B.1: PMM FRAME ALLOCATION FAILED\n"
+        );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    /*
+     * Establish the real virtual → physical mapping.
+     */
+    int dynamic_map_result =
+        vmm_map_page(
+            batos_pml4,
+            dynamic_heap_virtual,
+            dynamic_heap_frame,
+            VMM_WRITABLE
+        );
+
+    serial_write_string(
+        "DYNAMIC HEAP MAP RESULT: "
+    );
+
+    serial_write_hex(
+        (uint64_t)(uint32_t)dynamic_map_result
+    );
+
+    serial_write_string("\n");
+
+    if (dynamic_map_result != 0)
+    {
+        serial_write_string(
+            "HEAP-1B.1: DYNAMIC PAGE MAPPING FAILED\n"
+        );
+
+        pmm_free_frame(
+            dynamic_heap_frame
+        );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    /*
+     * Verify the software page-table walk.
+     */
+    uint64_t translated_dynamic_heap =
+        0;
+
+    int dynamic_translation_result =
+        vmm_translate(
+            batos_pml4,
+            dynamic_heap_virtual,
+            &translated_dynamic_heap
+        );
+
+    serial_write_string(
+        "DYNAMIC HEAP TRANSLATION RESULT: "
+    );
+
+    serial_write_hex(
+        (uint64_t)(uint32_t)dynamic_translation_result
+    );
+
+    serial_write_string("\n");
+
+    serial_write_string(
+        "DYNAMIC HEAP TRANSLATED PHYSICAL: "
+    );
+
+    serial_write_hex(
+        translated_dynamic_heap
+    );
+
+    serial_write_string("\n");
+
+    if (dynamic_translation_result != 0 ||
+        translated_dynamic_heap != dynamic_heap_frame)
+    {
+        serial_write_string(
+            "HEAP-1B.1: SOFTWARE TRANSLATION FAILED\n"
+        );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    serial_write_string(
+        "HEAP-1B.1: SOFTWARE TRANSLATION VERIFIED\n"
+    );
+
+    /*
+     * REAL CPU MEMORY ACCESS.
+     *
+     * This access must travel through the active BATOS
+     * page-table hierarchy established by CR3.
+     */
+    volatile uint64_t *dynamic_heap_address =
+        (volatile uint64_t *)dynamic_heap_virtual;
+
+    uint64_t dynamic_heap_pattern =
+        0x4241544F532D3142ULL;
+
+    *dynamic_heap_address =
+        dynamic_heap_pattern;
+
+    uint64_t dynamic_heap_readback =
+        *dynamic_heap_address;
+
+    serial_write_string(
+        "DYNAMIC HEAP CPU WRITE/READ: "
+    );
+
+    serial_write_hex(
+        dynamic_heap_readback
+    );
+
+    serial_write_string("\n");
+
+    if (dynamic_heap_readback !=
+        dynamic_heap_pattern)
+    {
+        serial_write_string(
+            "HEAP-1B.1: CPU MEMORY ACCESS FAILED\n"
+        );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    serial_write_string(
+        "HEAP-1B.1: CPU MEMORY ACCESS VERIFIED\n"
+    );
+
+    /*
+     * Remove the virtual mapping.
+     *
+     * vmm_unmap_page() returns the physical frame but does
+     * not release it; PMM remains responsible for ownership.
+     */
+    uint64_t unmapped_dynamic_frame =
+        0;
+
+    int dynamic_unmap_result =
+        vmm_unmap_page(
+            batos_pml4,
+            dynamic_heap_virtual,
+            &unmapped_dynamic_frame
+        );
+
+    serial_write_string(
+        "DYNAMIC HEAP UNMAP RESULT: "
+    );
+
+    serial_write_hex(
+        (uint64_t)(uint32_t)dynamic_unmap_result
+    );
+
+    serial_write_string("\n");
+
+    serial_write_string(
+        "UNMAPPED DYNAMIC HEAP FRAME: "
+    );
+
+    serial_write_hex(
+        unmapped_dynamic_frame
+    );
+
+    serial_write_string("\n");
+
+    if (dynamic_unmap_result != 0 ||
+        unmapped_dynamic_frame != dynamic_heap_frame)
+    {
+        serial_write_string(
+            "HEAP-1B.1: UNMAP FRAME VERIFICATION FAILED\n"
+        );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    /*
+     * Confirm that the virtual mapping is gone.
+     */
+    uint64_t dynamic_after_unmap_physical =
+        0;
+
+    int dynamic_after_unmap_translation =
+        vmm_translate(
+            batos_pml4,
+            dynamic_heap_virtual,
+            &dynamic_after_unmap_physical
+        );
+
+    serial_write_string(
+        "AFTER UNMAP TRANSLATION RESULT: "
+    );
+
+    serial_write_hex(
+        (uint64_t)(uint32_t)dynamic_after_unmap_translation
+    );
+
+    serial_write_string("\n");
+
+    if (dynamic_after_unmap_translation == 0)
+    {
+        serial_write_string(
+            "HEAP-1B.1: TRANSLATION STILL PRESENT\n"
+        );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    serial_write_string(
+        "HEAP-1B.1: TRANSLATION REMOVED\n"
+    );
+
+    /*
+     * Release the physical frame back to PMM.
+     */
+    pmm_free_frame(
+        unmapped_dynamic_frame
+    );
+
+    serial_write_string(
+        "HEAP-1B.1: PMM FRAME RELEASED\n"
+    );
+
+    serial_write_string(
+        "HEAP-1B.1: DYNAMIC KERNEL PAGE VERIFIED\n"
+    );
+
+    /* --------------------------------------------------------
        HEAP-1A BOOTSTRAP HEAP VERIFICATION
        -------------------------------------------------------- */
+
 
     serial_write_string(
         "\nHEAP-1A BOOTSTRAP HEAP TEST\n"
