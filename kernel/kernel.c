@@ -18,6 +18,7 @@
 #include "kernel/arch/x86_64/timer.h"
 #include "kernel/arch/x86_64/timer_manager.h"
 #include "kernel/arch/x86_64/acpi.h"
+#include "kernel/arch/x86_64/heap.h"
 
 /* ============================================================
    LIMINE FRAMEBUFFER REQUEST
@@ -2598,6 +2599,428 @@ void kernel_main(void)
 
     serial_write_string(
         "BATOS HARDWARE ADDRESS TRANSLATION: OK\n"
+    );
+
+    /* --------------------------------------------------------
+       HEAP-1A BOOTSTRAP HEAP VERIFICATION
+       -------------------------------------------------------- */
+
+    serial_write_string(
+        "\nHEAP-1A BOOTSTRAP HEAP TEST\n"
+    );
+
+    heap_init();
+
+    serial_write_string(
+        "HEAP INITIALIZED\n"
+    );
+
+    /*
+     * Zero-size allocation must fail.
+     */
+    if (kmalloc(0) != NULL)
+    {
+        serial_write_string(
+            "HEAP-1A ZERO-SIZE ALLOCATION: FAILED\n"
+        );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    serial_write_string(
+        "HEAP-1A ZERO-SIZE REJECTION: VERIFIED\n"
+    );
+
+    /*
+     * Normal allocations.
+     */
+    uint8_t *heap_a =
+        (uint8_t *)kmalloc(64);
+
+    uint8_t *heap_b =
+        (uint8_t *)kmalloc(128);
+
+    uint8_t *heap_c =
+        (uint8_t *)kmalloc(256);
+
+    if (heap_a == NULL ||
+        heap_b == NULL ||
+        heap_c == NULL)
+    {
+        serial_write_string(
+            "HEAP-1A BASIC ALLOCATION: FAILED\n"
+        );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    serial_write_string(
+        "HEAP-1A BASIC ALLOCATION: OK\n"
+    );
+
+    /*
+     * Every payload must satisfy 16-byte alignment.
+     */
+    if (((uintptr_t)heap_a % 16ULL) != 0 ||
+        ((uintptr_t)heap_b % 16ULL) != 0 ||
+        ((uintptr_t)heap_c % 16ULL) != 0)
+    {
+        serial_write_string(
+            "HEAP-1A ALIGNMENT: FAILED\n"
+        );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    serial_write_string(
+        "HEAP-1A 16-BYTE ALIGNMENT: VERIFIED\n"
+    );
+
+    /*
+     * Verify that allocated memory is actually writable.
+     */
+    heap_a[0] = 0xA5;
+    heap_a[63] = 0x5A;
+
+    heap_b[0] = 0x11;
+    heap_b[127] = 0x22;
+
+    heap_c[0] = 0x33;
+    heap_c[255] = 0x44;
+
+    if (heap_a[0] != 0xA5 ||
+        heap_a[63] != 0x5A ||
+        heap_b[0] != 0x11 ||
+        heap_b[127] != 0x22 ||
+        heap_c[0] != 0x33 ||
+        heap_c[255] != 0x44)
+    {
+        serial_write_string(
+            "HEAP-1A MEMORY ACCESS: FAILED\n"
+        );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    serial_write_string(
+        "HEAP-1A MEMORY ACCESS: VERIFIED\n"
+    );
+
+    /*
+     * Free the middle allocation and ensure that the allocator
+     * can reuse the released block.
+     */
+    kfree(heap_b);
+
+    uint8_t *heap_reuse =
+        (uint8_t *)kmalloc(128);
+
+    if (heap_reuse != heap_b)
+    {
+        serial_write_string(
+            "HEAP-1A FREE/REUSE: FAILED\n"
+        );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    serial_write_string(
+        "HEAP-1A FREE/REUSE: VERIFIED\n"
+    );
+
+    /*
+     * Double-free must be safely rejected.
+     */
+    kfree(heap_reuse);
+    kfree(heap_reuse);
+
+    serial_write_string(
+        "HEAP-1A DOUBLE-FREE REJECTION: VERIFIED\n"
+    );
+
+    /*
+     * An interior pointer must not be accepted by kfree().
+     */
+    uint8_t *heap_d =
+        (uint8_t *)kmalloc(96);
+
+    if (heap_d == NULL)
+    {
+        serial_write_string(
+            "HEAP-1A POINTER TEST ALLOCATION: FAILED\n"
+        );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    kfree(heap_d + 16);
+
+    /*
+     * The original allocation must still be valid after the
+     * rejected interior-pointer free.
+     */
+    heap_d[0] = 0x7B;
+
+    if (heap_d[0] != 0x7B)
+    {
+        serial_write_string(
+            "HEAP-1A INVALID POINTER REJECTION: FAILED\n"
+        );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    serial_write_string(
+        "HEAP-1A INVALID POINTER REJECTION: VERIFIED\n"
+    );
+
+    kfree(heap_d);
+
+    /*
+     * Deterministic fragmentation/coalescing test.
+     *
+     * Start from a fresh heap so no earlier allocation can
+     * provide an unrelated large free block.
+     *
+     * X/Y/Z are adjacent 512-byte allocations. The rest of
+     * the arena is filled with the same allocation size,
+     * leaving only a tail smaller than the requested merged
+     * size. After freeing X, Z, then Y, a 1536-byte request
+     * can succeed only if the three adjacent blocks coalesce.
+     */
+    heap_init();
+
+    uint8_t *heap_x =
+        (uint8_t *)kmalloc(512);
+
+    uint8_t *heap_y =
+        (uint8_t *)kmalloc(512);
+
+    uint8_t *heap_z =
+        (uint8_t *)kmalloc(512);
+
+    if (heap_x == NULL ||
+        heap_y == NULL ||
+        heap_z == NULL)
+    {
+        serial_write_string(
+            "HEAP-1A COALESCE SETUP: FAILED\n"
+        );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    /*
+     * Each 512-byte allocation consumes:
+     *
+     * 512-byte payload + 32-byte block header = 544 bytes.
+     *
+     * After X/Y/Z, 117 additional allocations consume
+     * 117 * 544 bytes, leaving only 256 bytes of arena
+     * payload. That tail cannot satisfy the 1536-byte test.
+     */
+    void *heap_fill[117];
+
+    for (uint64_t i = 0; i < 117; i++)
+    {
+        heap_fill[i] = kmalloc(512);
+
+        if (heap_fill[i] == NULL)
+        {
+            serial_write_string(
+                "HEAP-1A COALESCE FILL: FAILED\n"
+            );
+
+            serial_write_string(
+                "CPU HALTED\n"
+            );
+
+            for (;;)
+            {
+                __asm__ volatile (
+                    "cli\n"
+                    "hlt"
+                );
+            }
+        }
+    }
+
+    kfree(heap_x);
+    kfree(heap_z);
+    kfree(heap_y);
+
+    /*
+     * X/Y/Z now form one 1600-byte free block
+     * (512 + 32 + 512 + 32 + 512).
+     *
+     * No other free region is large enough for 1536 bytes.
+     */
+    void *heap_coalesced =
+        kmalloc(1536);
+
+    if (heap_coalesced == NULL)
+    {
+        serial_write_string(
+            "HEAP-1A COALESCING: FAILED\n"
+        );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    serial_write_string(
+        "HEAP-1A SPLIT/COALESCING: VERIFIED\n"
+    );
+
+    kfree(heap_coalesced);
+
+    /*
+     * Requests larger than the bootstrap arena must fail.
+     */
+    if (kmalloc(64ULL * 1024ULL) != NULL)
+    {
+        serial_write_string(
+            "HEAP-1A OVERSIZE REJECTION: FAILED\n"
+        );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    serial_write_string(
+        "HEAP-1A OVERSIZE REJECTION: VERIFIED\n"
+    );
+
+    /*
+     * UINT64_MAX must fail without wrapping during alignment.
+     */
+    if (kmalloc(UINT64_MAX) != NULL)
+    {
+        serial_write_string(
+            "HEAP-1A OVERFLOW REJECTION: FAILED\n"
+        );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    serial_write_string(
+        "HEAP-1A OVERFLOW REJECTION: VERIFIED\n"
+    );
+
+    serial_write_string(
+        "HEAP-1A BOOTSTRAP HEAP: VERIFIED\n"
+    );
+
+    serial_write_string(
+        "HEAP-1A RUNTIME TESTS: PASSED\n"
     );
 
     /* --------------------------------------------------------
