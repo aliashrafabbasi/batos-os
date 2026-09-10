@@ -3040,7 +3040,7 @@ void kernel_main(void)
      * This is only a test address for Heap-1B.1.
      */
     uint64_t dynamic_heap_virtual =
-        0xffffffff80040000ULL;
+        0xffffffff80042000ULL;
 
     uint64_t dynamic_heap_physical = 0;
 
@@ -3816,8 +3816,451 @@ void kernel_main(void)
     );
 
     /* --------------------------------------------------------
+       HEAP-1B.2 DYNAMIC PAGE OWNERSHIP VERIFICATION
+       -------------------------------------------------------- */
+
+    serial_write_string(
+        "\nHEAP-1B.2 DYNAMIC PAGE OWNERSHIP TEST\n"
+    );
+
+    /*
+     * Record the PMM free-frame count before acquiring the
+     * dynamic heap page. The page-table hierarchy was already
+     * created by HEAP-1B.1, so this test should consume exactly
+     * one physical frame.
+     */
+    uint64_t heap_dynamic_free_before =
+        pmm_get_free_frames();
+
+    serial_write_string(
+        "DYNAMIC PAGE FREE FRAMES BEFORE: "
+    );
+
+    serial_write_hex(
+        heap_dynamic_free_before
+    );
+
+    serial_write_string("\n");
+
+    /*
+     * Acquire one real PMM/VMM-backed heap page.
+     */
+    uint64_t heap_dynamic_virtual =
+        heap_dynamic_page_acquire();
+
+    if (heap_dynamic_virtual == 0)
+    {
+        serial_write_string(
+            "HEAP-1B.2: DYNAMIC PAGE ACQUIRE FAILED\n"
+        );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    serial_write_string(
+        "DYNAMIC PAGE VIRTUAL: "
+    );
+
+    serial_write_hex(
+        heap_dynamic_virtual
+    );
+
+    serial_write_string("\n");
+
+    /*
+     * The ownership primitive must return the fixed dynamic
+     * heap virtual address defined by heap.c.
+     */
+    if (heap_dynamic_virtual !=
+        0xffffffff80042000ULL)
+    {
+        serial_write_string(
+            "HEAP-1B.2: VIRTUAL ADDRESS VERIFICATION FAILED\n"
+        );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    serial_write_string(
+        "HEAP-1B.2: VIRTUAL ADDRESS VERIFIED\n"
+    );
+
+    /*
+     * Verify the software page-table translation and obtain
+     * the physical frame owned by the heap layer.
+     */
+    uint64_t heap_dynamic_physical = 0;
+
+    int heap_dynamic_translate_result =
+        vmm_translate(
+            vmm_get_pml4(),
+            heap_dynamic_virtual,
+            &heap_dynamic_physical
+        );
+
+    if (heap_dynamic_translate_result != 0 ||
+        heap_dynamic_physical == 0 ||
+        (heap_dynamic_physical &
+         (VMM_PAGE_SIZE - 1)) != 0)
+    {
+        serial_write_string(
+            "HEAP-1B.2: SOFTWARE TRANSLATION FAILED\n"
+        );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    serial_write_string(
+        "DYNAMIC PAGE PHYSICAL: "
+    );
+
+    serial_write_hex(
+        heap_dynamic_physical
+    );
+
+    serial_write_string("\n");
+
+    serial_write_string(
+        "HEAP-1B.2: SOFTWARE TRANSLATION VERIFIED\n"
+    );
+
+    /*
+     * Real CPU memory access through the returned virtual
+     * address. This proves that the mapping is active in the
+     * current address space, not merely present in software
+     * page-table structures.
+     */
+    volatile uint64_t *heap_dynamic_memory =
+        (volatile uint64_t *)(uintptr_t)
+            heap_dynamic_virtual;
+
+    const uint64_t heap_dynamic_pattern =
+        0x4241544F532D3142ULL;
+
+    *heap_dynamic_memory =
+        heap_dynamic_pattern;
+
+    uint64_t heap_dynamic_readback =
+        *heap_dynamic_memory;
+
+    serial_write_string(
+        "DYNAMIC PAGE CPU WRITE/READ: "
+    );
+
+    serial_write_hex(
+        heap_dynamic_readback
+    );
+
+    serial_write_string("\n");
+
+    if (heap_dynamic_readback !=
+        heap_dynamic_pattern)
+    {
+        serial_write_string(
+            "HEAP-1B.2: CPU MEMORY ACCESS FAILED\n"
+        );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    serial_write_string(
+        "HEAP-1B.2: CPU MEMORY ACCESS VERIFIED\n"
+    );
+
+    /*
+     * A second acquire while the page is already owned must
+     * be rejected. The existing mapping must not be replaced
+     * and no additional PMM frame may be consumed.
+     */
+    if (heap_dynamic_page_acquire() != 0)
+    {
+        serial_write_string(
+            "HEAP-1B.2: DUPLICATE ACQUIRE REJECTION FAILED\n"
+        );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    if (pmm_get_free_frames() !=
+        heap_dynamic_free_before - 1)
+    {
+        serial_write_string(
+            "HEAP-1B.2: PMM FRAME ACCOUNTING FAILED\n"
+        );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    serial_write_string(
+        "HEAP-1B.2: DUPLICATE ACQUIRE REJECTED\n"
+    );
+
+    /*
+     * Release the exact page through the heap ownership layer.
+     */
+    if (heap_dynamic_page_release(
+            heap_dynamic_virtual
+        ) != 0)
+    {
+        serial_write_string(
+            "HEAP-1B.2: DYNAMIC PAGE RELEASE FAILED\n"
+        );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    /*
+     * Software translation must disappear after release.
+     */
+    uint64_t heap_dynamic_after_release =
+        0;
+
+    if (vmm_translate(
+            vmm_get_pml4(),
+            heap_dynamic_virtual,
+            &heap_dynamic_after_release
+        ) == 0)
+    {
+        serial_write_string(
+            "HEAP-1B.2: TRANSLATION STILL PRESENT\n"
+        );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    serial_write_string(
+        "HEAP-1B.2: TRANSLATION REMOVED\n"
+    );
+
+    /*
+     * The physical frame must have returned to PMM.
+     */
+    uint64_t heap_dynamic_free_after =
+        pmm_get_free_frames();
+
+    serial_write_string(
+        "DYNAMIC PAGE FREE FRAMES AFTER: "
+    );
+
+    serial_write_hex(
+        heap_dynamic_free_after
+    );
+
+    serial_write_string("\n");
+
+    if (heap_dynamic_free_after !=
+        heap_dynamic_free_before)
+    {
+        serial_write_string(
+            "HEAP-1B.2: PMM FRAME RELEASE FAILED\n"
+        );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    serial_write_string(
+        "HEAP-1B.2: PMM FRAME LIFECYCLE VERIFIED\n"
+    );
+
+    /*
+     * Re-acquisition proves that release restored the page's
+     * ownership state and that the physical frame can be
+     * legitimately acquired again.
+     */
+    uint64_t heap_dynamic_reacquired =
+        heap_dynamic_page_acquire();
+
+    if (heap_dynamic_reacquired !=
+        heap_dynamic_virtual)
+    {
+        serial_write_string(
+            "HEAP-1B.2: RE-ACQUIRE FAILED\n"
+        );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    serial_write_string(
+        "HEAP-1B.2: RE-ACQUIRE VERIFIED\n"
+    );
+
+    if (heap_dynamic_page_release(
+            heap_dynamic_reacquired
+        ) != 0)
+    {
+        serial_write_string(
+            "HEAP-1B.2: FINAL RELEASE FAILED\n"
+        );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    /*
+     * Releasing an already released page must be rejected.
+     */
+    if (heap_dynamic_page_release(
+            heap_dynamic_reacquired
+        ) == 0)
+    {
+        serial_write_string(
+            "HEAP-1B.2: DOUBLE RELEASE REJECTION FAILED\n"
+        );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    if (pmm_get_free_frames() !=
+        heap_dynamic_free_before)
+    {
+        serial_write_string(
+            "HEAP-1B.2: FINAL PMM ACCOUNTING FAILED\n"
+        );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    serial_write_string(
+        "HEAP-1B.2: DOUBLE RELEASE REJECTED\n"
+    );
+
+    serial_write_string(
+        "HEAP-1B.2 DYNAMIC PAGE OWNERSHIP: VERIFIED\n"
+    );
+
+    /* --------------------------------------------------------
        LOCAL APIC BRING-UP
        -------------------------------------------------------- */
+
 
     serial_write_string(
         "LAPIC BRING-UP START\n"
