@@ -23,6 +23,7 @@ ISO_DIR = iso_root
 C_SOURCES = \
     kernel/kernel.c \
     kernel/tests/heap_tests.c \
+    kernel/tests/memory_tests.c \
     kernel/console/console.c \
     kernel/arch/x86_64/gdt.c \
     kernel/arch/x86_64/idt.c \
