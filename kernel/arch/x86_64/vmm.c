@@ -77,6 +77,16 @@ static uint64_t page_table_record_count = 0;
 
 static uint64_t kernel_pml4 = 0;
 
+#ifdef BATOS_VMM_TEST
+/*
+ * Private test-only failure injection.
+ *
+ * This symbol is intentionally not declared in vmm.h.
+ * Production VMM users therefore cannot depend on it.
+ */
+int vmm_test_fail_pt_allocation = 0;
+#endif
+
 /*
  * Standalone root returned by the most recent
  * recursive clone operation.
@@ -189,6 +199,23 @@ static uint64_t allocate_page_table(
     uint64_t owner_pml4
 )
 {
+#ifdef BATOS_VMM_TEST
+    /*
+     * VMM transactional rollback negative-path test.
+     *
+     * The test deliberately fails PT allocation after
+     * PDPT and PD creation. This lets vmm_map_page()
+     * exercise its complete rollback path.
+     */
+    extern int vmm_test_fail_pt_allocation;
+
+    if (level == VMM_LEVEL_PT &&
+        vmm_test_fail_pt_allocation)
+    {
+        return 0;
+    }
+#endif
+
     uint64_t physical =
         pmm_alloc_frame();
 
@@ -248,15 +275,27 @@ find_page_table_record(uint64_t physical_address)
 
 /*
  * Get an existing child page table or create one.
+ *
+ * If created is non-NULL:
+ *
+ *     *created = 0  -> existing table
+ *     *created = 1  -> newly allocated table
+ *
+ * The caller can therefore roll back only the table
+ * created by its current operation.
  */
 static uint64_t get_or_create_table(
     uint64_t *parent,
     uint64_t index,
     uint64_t flags,
     int child_level,
-    uint64_t owner_pml4
+    uint64_t owner_pml4,
+    int *created
 )
 {
+    if (created != NULL)
+        *created = 0;
+
     uint64_t entry =
         parent[index];
 
@@ -280,7 +319,81 @@ static uint64_t get_or_create_table(
         VMM_WRITABLE |
         (flags & VMM_USER);
 
+    if (created != NULL)
+        *created = 1;
+
     return child;
+}
+
+/*
+ * Release one VMM-owned page-table frame.
+ *
+ * This is used for transactional rollback of a page
+ * table created by the current mapping operation.
+ *
+ * The ownership registry remains append-only. The
+ * corresponding record is marked inactive instead of
+ * decreasing page_table_record_count.
+ */
+static int release_page_table(
+    uint64_t physical_address
+)
+{
+    struct vmm_page_table_record *record =
+        find_page_table_record(
+            physical_address
+        );
+
+    if (record == NULL)
+        return -1;
+
+    if (!record->in_use)
+        return -1;
+
+    record->in_use = 0;
+
+    pmm_free_frame(
+        physical_address
+    );
+
+    return 0;
+}
+
+/*
+ * Roll back one newly-created child page table.
+ *
+ * The parent entry must still reference exactly this
+ * child before it can be detached and released.
+ */
+static int rollback_page_table(
+    uint64_t *parent,
+    uint64_t index,
+    uint64_t child_physical
+)
+{
+    if (parent == NULL ||
+        child_physical == 0)
+    {
+        return -1;
+    }
+
+    uint64_t entry =
+        parent[index];
+
+    if (!(entry & VMM_PRESENT))
+        return -1;
+
+    if ((entry & ADDRESS_MASK) !=
+        child_physical)
+    {
+        return -1;
+    }
+
+    parent[index] = 0;
+
+    return release_page_table(
+        child_physical
+    );
 }
 
 /*
@@ -305,6 +418,30 @@ static uint64_t pt_index(uint64_t virtual_address)
 {
     return (virtual_address >> 12) & 0x1FF;
 }
+
+
+#ifdef BATOS_VMM_TEST
+/*
+ * Verify that the PML4 slot selected by a test virtual
+ * address is genuinely unused before a transactional
+ * rollback test begins.
+ *
+ * Test-only helper. Not part of the production VMM API.
+ */
+int vmm_test_is_pml4_slot_empty(
+    uint64_t pml4_physical,
+    uint64_t virtual_address
+)
+{
+    if (pml4_physical == 0)
+        return 0;
+
+    uint64_t *pml4 =
+        physical_to_virtual(pml4_physical);
+
+    return pml4[pml4_index(virtual_address)] == 0;
+}
+#endif
 
 /*
  * Verify one VMM page-table ownership record.
@@ -729,6 +866,10 @@ int vmm_verify_address_space_state(
 
 /*
  * Map one 4 KiB virtual page to one physical frame.
+ *
+ * Intermediate page-table creation is transactional:
+ * any page tables created by this mapping attempt are
+ * released again if a later step fails.
  */
 int vmm_map_page(
     uint64_t pml4_physical,
@@ -752,6 +893,10 @@ int vmm_map_page(
     uint64_t *pml4 =
         physical_to_virtual(pml4_physical);
 
+    int pdpt_created = 0;
+    int pd_created = 0;
+    int pt_created = 0;
+
     /*
      * PML4 → PDPT
      */
@@ -761,7 +906,8 @@ int vmm_map_page(
             pml4_index(virtual_address),
             flags,
             VMM_LEVEL_PDPT,
-            pml4_physical
+            pml4_physical,
+            &pdpt_created
         );
 
     if (pdpt_physical == 0)
@@ -779,11 +925,23 @@ int vmm_map_page(
             pdpt_index(virtual_address),
             flags,
             VMM_LEVEL_PD,
-            pml4_physical
+            pml4_physical,
+            &pd_created
         );
 
     if (pd_physical == 0)
+    {
+        if (pdpt_created)
+        {
+            rollback_page_table(
+                pml4,
+                pml4_index(virtual_address),
+                pdpt_physical
+            );
+        }
+
         return -1;
+    }
 
     uint64_t *pd =
         physical_to_virtual(pd_physical);
@@ -797,11 +955,32 @@ int vmm_map_page(
             pd_index(virtual_address),
             flags,
             VMM_LEVEL_PT,
-            pml4_physical
+            pml4_physical,
+            &pt_created
         );
 
     if (pt_physical == 0)
+    {
+        if (pd_created)
+        {
+            rollback_page_table(
+                pdpt,
+                pdpt_index(virtual_address),
+                pd_physical
+            );
+        }
+
+        if (pdpt_created)
+        {
+            rollback_page_table(
+                pml4,
+                pml4_index(virtual_address),
+                pdpt_physical
+            );
+        }
+
         return -1;
+    }
 
     uint64_t *pt =
         physical_to_virtual(pt_physical);
@@ -811,9 +990,41 @@ int vmm_map_page(
 
     /*
      * Refuse to silently overwrite an existing mapping.
+     *
+     * If this PT was newly created, it cannot normally
+     * contain a present PTE. Keep the check defensive.
      */
     if (pt[index] & VMM_PRESENT)
+    {
+        if (pt_created)
+        {
+            rollback_page_table(
+                pd,
+                pd_index(virtual_address),
+                pt_physical
+            );
+        }
+
+        if (pd_created)
+        {
+            rollback_page_table(
+                pdpt,
+                pdpt_index(virtual_address),
+                pd_physical
+            );
+        }
+
+        if (pdpt_created)
+        {
+            rollback_page_table(
+                pml4,
+                pml4_index(virtual_address),
+                pdpt_physical
+            );
+        }
+
         return -1;
+    }
 
     /*
      * Create final PTE.

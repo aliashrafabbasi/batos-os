@@ -2789,6 +2789,7 @@ void kernel_main(void)
         }
     }
 
+
     /*
      * The virtual mapping must now be absent.
      *
@@ -2886,6 +2887,368 @@ void kernel_main(void)
         "VMM-2F: PAGE UNMAP + FRAME LIFECYCLE VERIFIED\n"
     );
 
+
+#ifdef BATOS_VMM_TEST
+    /* --------------------------------------------------------
+       VMM-3.2C TRANSACTIONAL MAP ROLLBACK TEST
+       -------------------------------------------------------- */
+
+    serial_write_string(
+        "\nVMM-3.2C TRANSACTIONAL MAP ROLLBACK TEST\n"
+    );
+
+    /*
+     * This VA is deliberately outside the addresses already
+     * exercised by the earlier VMM tests.
+     */
+    uint64_t rollback_test_virtual =
+        0x0000400000000000ULL;
+
+    uint64_t rollback_test_frame =
+        pmm_alloc_frame();
+
+    if (rollback_test_frame == 0)
+    {
+        serial_write_string(
+            "VMM-3.2C: TEST FRAME ALLOCATION FAILED\n"
+        );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    uint64_t rollback_free_before =
+        pmm_get_free_frames();
+
+    serial_write_string(
+        "ROLLBACK TEST PMM BASELINE: "
+    );
+    serial_write_hex(
+        rollback_free_before
+    );
+    serial_write_string("\n");
+
+    extern int vmm_test_is_pml4_slot_empty(
+        uint64_t pml4_physical,
+        uint64_t virtual_address
+    );
+
+    int rollback_pml4_empty =
+        vmm_test_is_pml4_slot_empty(
+            pml4,
+            rollback_test_virtual
+        );
+
+    if (!rollback_pml4_empty)
+    {
+        serial_write_string(
+            "VMM-3.2C: TEST VA PML4 SLOT NOT FRESH\n"
+        );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    serial_write_string(
+        "VMM-3.2C: TEST PML4 SLOT EMPTY\n"
+    );
+
+    extern int vmm_test_fail_pt_allocation;
+
+    vmm_test_fail_pt_allocation = 1;
+
+    int rollback_result =
+        vmm_map_page(
+            pml4,
+            rollback_test_virtual,
+            rollback_test_frame,
+            VMM_WRITABLE
+        );
+
+    vmm_test_fail_pt_allocation = 0;
+
+    serial_write_string(
+        "FORCED PT FAILURE RESULT: "
+    );
+    serial_write_hex(
+        (uint64_t)(uint32_t)rollback_result
+    );
+    serial_write_string("\n");
+
+    if (rollback_result == 0)
+    {
+        serial_write_string(
+            "VMM-3.2C: FAILURE INJECTION DID NOT FAIL\n"
+        );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    uint64_t rollback_free_after =
+        pmm_get_free_frames();
+
+    serial_write_string(
+        "ROLLBACK TEST PMM AFTER FAILURE: "
+    );
+    serial_write_hex(
+        rollback_free_after
+    );
+    serial_write_string("\n");
+
+    if (rollback_free_after !=
+        rollback_free_before)
+    {
+        serial_write_string(
+            "VMM-3.2C: PMM ROLLBACK LEAK DETECTED\n"
+        );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    uint64_t rollback_physical = 0;
+
+    int rollback_translate_result =
+        vmm_translate(
+            pml4,
+            rollback_test_virtual,
+            &rollback_physical
+        );
+
+    serial_write_string(
+        "ROLLBACK TEST TRANSLATION RESULT: "
+    );
+    serial_write_hex(
+        (uint64_t)(uint32_t)
+            rollback_translate_result
+    );
+    serial_write_string("\n");
+
+    if (rollback_translate_result == 0)
+    {
+        serial_write_string(
+            "VMM-3.2C: MAPPING SURVIVED ROLLBACK\n"
+        );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    serial_write_string(
+        "VMM-3.2C: PAGE-TABLE ROLLBACK VERIFIED\n"
+    );
+
+    /*
+     * The failed mapping never took ownership of the test
+     * frame because the final PTE was never installed.
+     * Release the frame allocated specifically for this test.
+     */
+    pmm_free_frame(
+        rollback_test_frame
+    );
+
+    /*
+     * Recovery test:
+     *
+     * With failure injection disabled, the same fresh VA
+     * must be mappable normally.
+     */
+    uint64_t recovery_frame =
+        pmm_alloc_frame();
+
+    if (recovery_frame == 0)
+    {
+        serial_write_string(
+            "VMM-3.2C: RECOVERY FRAME ALLOCATION FAILED\n"
+        );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    int recovery_result =
+        vmm_map_page(
+            pml4,
+            rollback_test_virtual,
+            recovery_frame,
+            VMM_WRITABLE
+        );
+
+    serial_write_string(
+        "RECOVERY MAP RESULT: "
+    );
+    serial_write_hex(
+        (uint64_t)(uint32_t)recovery_result
+    );
+    serial_write_string("\n");
+
+    if (recovery_result != 0)
+    {
+        serial_write_string(
+            "VMM-3.2C: RECOVERY MAP FAILED\n"
+        );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    uint64_t recovery_physical = 0;
+
+    if (vmm_translate(
+            pml4,
+            rollback_test_virtual,
+            &recovery_physical
+        ) != 0 ||
+        recovery_physical != recovery_frame)
+    {
+        serial_write_string(
+            "VMM-3.2C: RECOVERY TRANSLATION FAILED\n"
+        );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    volatile uint64_t *recovery_address =
+        (volatile uint64_t *)
+            rollback_test_virtual;
+
+    uint64_t recovery_pattern =
+        0x4241544F532D3343ULL;
+
+    *recovery_address = recovery_pattern;
+
+    if (*recovery_address != recovery_pattern)
+    {
+        serial_write_string(
+            "VMM-3.2C: RECOVERY HARDWARE ACCESS FAILED\n"
+        );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    uint64_t unmapped_recovery_frame = 0;
+
+    if (vmm_unmap_page(
+            pml4,
+            rollback_test_virtual,
+            &unmapped_recovery_frame
+        ) != 0 ||
+        unmapped_recovery_frame != recovery_frame)
+    {
+        serial_write_string(
+            "VMM-3.2C: RECOVERY UNMAP FAILED\n"
+        );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    pmm_free_frame(
+        unmapped_recovery_frame
+    );
+
+    serial_write_string(
+        "VMM-3.2C: RECOVERY MAP + CPU ACCESS VERIFIED\n"
+    );
+
+    serial_write_string(
+        "VMM-3.2C: TRANSACTIONAL ROLLBACK VERIFIED\n"
+    );
+
+#endif
     /* --------------------------------------------------------
        VMM-2E HARDWARE PAGE TRANSLATION TEST
        -------------------------------------------------------- */
