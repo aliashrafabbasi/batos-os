@@ -3032,15 +3032,15 @@ void kernel_main(void)
     );
 
     /*
-     * First page immediately after the current kernel image.
-     *
-     * The address was selected from the ELF kernel layout:
-     * the current kernel image ends before 0xffffffff80040000.
+     * Use the linker-defined first page-aligned virtual address
+     * after the linked kernel image.
      *
      * This is only a test address for Heap-1B.1.
      */
+    extern char __heap_start[];
+
     uint64_t dynamic_heap_virtual =
-        0xffffffff80042000ULL;
+        (uint64_t)(uintptr_t)__heap_start;
 
     uint64_t dynamic_heap_physical = 0;
 
@@ -3878,11 +3878,13 @@ void kernel_main(void)
     serial_write_string("\n");
 
     /*
-     * The ownership primitive must return the fixed dynamic
-     * heap virtual address defined by heap.c.
+     * The ownership primitive must return the linker-defined
+     * dynamic heap virtual address.
      */
+    extern char __heap_start[];
+
     if (heap_dynamic_virtual !=
-        0xffffffff80042000ULL)
+        (uint64_t)(uintptr_t)__heap_start)
     {
         serial_write_string(
             "HEAP-1B.2: VIRTUAL ADDRESS VERIFICATION FAILED\n"

@@ -27,11 +27,15 @@
  *
  * First PMM/VMM-backed dynamic heap page.
  *
- * This address is the first page after the currently linked
- * kernel image. It is a managed heap virtual address, not a
- * direct physical address.
+ * The linker defines __heap_start as the first page-aligned
+ * virtual address after the linked kernel image.
+ *
+ * This is a managed heap virtual address, not a direct
+ * physical address.
  */
-#define HEAP_DYNAMIC_PAGE_VIRTUAL  0xffffffff80042000ULL
+extern char __heap_start[];
+
+#define HEAP_DYNAMIC_PAGE_VIRTUAL  ((uint64_t)(uintptr_t)__heap_start)
 
 struct heap_block
 {

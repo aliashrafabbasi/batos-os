@@ -57,6 +57,17 @@ SECTIONS
     }
 
     /*
+     * Exact end of the linked kernel image before page alignment.
+     */
+    __kernel_end = .;
+
+    /*
+     * First page-aligned virtual address after the kernel image.
+     */
+    . = ALIGN(4K);
+    __heap_start = .;
+
+    /*
      * Kernel does not need these sections.
      */
     /DISCARD/ :
