@@ -1,6 +1,6 @@
 #include <stdint.h>
 
-#include "kernel/arch/x86_64/acpi.h"
+#include "kernel/arch/x86_64/acpi/acpi.h"
 #include "kernel/console/console.h"
 
 void acpi_tests_run(void)

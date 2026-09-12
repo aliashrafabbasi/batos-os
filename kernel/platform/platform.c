@@ -1,6 +1,6 @@
 #include "platform.h"
 
-#include "kernel/arch/x86_64/acpi.h"
+#include "kernel/arch/x86_64/acpi/acpi.h"
 #include "kernel/arch/x86_64/apic/lapic.h"
 #include "kernel/arch/x86_64/apic/ioapic.h"
 #include "kernel/arch/x86_64/apic/gsi.h"

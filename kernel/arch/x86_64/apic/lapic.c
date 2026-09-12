@@ -1,5 +1,5 @@
 #include "kernel/arch/x86_64/apic/lapic.h"
-#include "kernel/arch/x86_64/acpi.h"
+#include "kernel/arch/x86_64/acpi/acpi.h"
 #include "kernel/mm/pmm/pmm.h"
 #include "kernel/arch/x86_64/time/clock_event.h"
 
