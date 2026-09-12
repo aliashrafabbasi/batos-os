@@ -27,6 +27,7 @@ C_SOURCES = \
     kernel/tests/memory_tests.c \
     kernel/tests/interrupt_tests.c \
     kernel/tests/timer_tests.c \
+    kernel/tests/acpi_tests.c \
     kernel/console/console.c \
     kernel/arch/x86_64/gdt.c \
     kernel/arch/x86_64/interrupt/idt.c \
