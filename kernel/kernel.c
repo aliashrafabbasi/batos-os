@@ -10,7 +10,7 @@
 #include "kernel/arch/x86_64/idt.h"
 #include "kernel/arch/x86_64/cpu/exception.h"
 #include "kernel/arch/x86_64/interrupt/pic.h"
-#include "kernel/arch/x86_64/irq.h"
+#include "kernel/arch/x86_64/interrupt/irq.h"
 #include "kernel/arch/x86_64/lapic.h"
 #include "kernel/arch/x86_64/ioapic.h"
 #include "kernel/arch/x86_64/gsi.h"
