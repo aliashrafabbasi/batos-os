@@ -1,7 +1,7 @@
-#include "gsi.h"
+#include "kernel/arch/x86_64/apic/gsi.h"
 
-#include "acpi.h"
-#include "ioapic.h"
+#include "kernel/arch/x86_64/acpi.h"
+#include "kernel/arch/x86_64/apic/ioapic.h"
 
 /*
  * ACPI Interrupt Source Override flags:

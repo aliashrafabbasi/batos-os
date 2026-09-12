@@ -1,9 +1,9 @@
 #include "platform.h"
 
 #include "kernel/arch/x86_64/acpi.h"
-#include "kernel/arch/x86_64/lapic.h"
-#include "kernel/arch/x86_64/ioapic.h"
-#include "kernel/arch/x86_64/gsi.h"
+#include "kernel/arch/x86_64/apic/lapic.h"
+#include "kernel/arch/x86_64/apic/ioapic.h"
+#include "kernel/arch/x86_64/apic/gsi.h"
 
 int platform_init(void)
 {

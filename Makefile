@@ -41,9 +41,9 @@ C_SOURCES = \
     kernel/arch/x86_64/timer.c \
     kernel/arch/x86_64/timer_manager.c \
     kernel/mm/heap/heap.c \
-    kernel/arch/x86_64/lapic.c \
-    kernel/arch/x86_64/ioapic.c \
-    kernel/arch/x86_64/gsi.c \
+    kernel/arch/x86_64/apic/lapic.c \
+    kernel/arch/x86_64/apic/ioapic.c \
+    kernel/arch/x86_64/apic/gsi.c \
     kernel/arch/x86_64/acpi.c \
     kernel/arch/x86_64/cpu/cpu.c \
     kernel/arch/x86_64/cpu/exception.c

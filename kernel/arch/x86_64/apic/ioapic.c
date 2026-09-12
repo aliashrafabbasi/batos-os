@@ -1,6 +1,6 @@
-#include "ioapic.h"
+#include "kernel/arch/x86_64/apic/ioapic.h"
 
-#include "acpi.h"
+#include "kernel/arch/x86_64/acpi.h"
 #include "kernel/mm/pmm/pmm.h"
 
 #define IOAPIC_PAGE_SIZE 4096ULL

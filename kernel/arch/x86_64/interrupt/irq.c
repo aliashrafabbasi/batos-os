@@ -1,6 +1,6 @@
 #include "kernel/arch/x86_64/interrupt/irq.h"
 #include "kernel/arch/x86_64/interrupt/pic.h"
-#include "kernel/arch/x86_64/lapic.h"
+#include "kernel/arch/x86_64/apic/lapic.h"
 #include "kernel/arch/x86_64/clock_event.h"
 
 static irq_handler_t irq_handlers[IRQ_COUNT];
