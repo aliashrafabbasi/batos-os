@@ -2,10 +2,10 @@
 
 #include "kernel/arch/x86_64/apic/lapic.h"
 #include "kernel/arch/x86_64/apic/gsi.h"
-#include "kernel/arch/x86_64/time.h"
-#include "kernel/arch/x86_64/clock_event.h"
-#include "kernel/arch/x86_64/timer.h"
-#include "kernel/arch/x86_64/timer_manager.h"
+#include "kernel/arch/x86_64/time/time.h"
+#include "kernel/arch/x86_64/time/clock_event.h"
+#include "kernel/arch/x86_64/time/timer.h"
+#include "kernel/arch/x86_64/time/timer_manager.h"
 #include "kernel/console/console.h"
 #include "kernel/tests/timer_tests.h"
 

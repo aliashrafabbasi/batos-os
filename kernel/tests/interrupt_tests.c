@@ -6,8 +6,8 @@
 #include "kernel/arch/x86_64/apic/lapic.h"
 #include "kernel/arch/x86_64/apic/ioapic.h"
 #include "kernel/arch/x86_64/apic/gsi.h"
-#include "kernel/arch/x86_64/time.h"
-#include "kernel/arch/x86_64/clock_event.h"
+#include "kernel/arch/x86_64/time/time.h"
+#include "kernel/arch/x86_64/time/clock_event.h"
 #include "interrupt_tests.h"
 
 void interrupt_tests_lapic_bringup(void)

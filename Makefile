@@ -35,11 +35,11 @@ C_SOURCES = \
     kernel/mm/vmm/vmm.c \
     kernel/arch/x86_64/interrupt/pic.c \
     kernel/arch/x86_64/interrupt/irq.c \
-    kernel/arch/x86_64/pit.c \
-    kernel/arch/x86_64/time.c \
-    kernel/arch/x86_64/clock_event.c \
-    kernel/arch/x86_64/timer.c \
-    kernel/arch/x86_64/timer_manager.c \
+    kernel/arch/x86_64/time/pit.c \
+    kernel/arch/x86_64/time/time.c \
+    kernel/arch/x86_64/time/clock_event.c \
+    kernel/arch/x86_64/time/timer.c \
+    kernel/arch/x86_64/time/timer_manager.c \
     kernel/mm/heap/heap.c \
     kernel/arch/x86_64/apic/lapic.c \
     kernel/arch/x86_64/apic/ioapic.c \
