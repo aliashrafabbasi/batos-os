@@ -1,6 +1,6 @@
 #include "acpi.h"
 
-#include "pmm.h"
+#include "kernel/mm/pmm/pmm.h"
 
 #include "../../../limine.h"
 

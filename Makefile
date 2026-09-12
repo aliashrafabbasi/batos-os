@@ -30,9 +30,9 @@ C_SOURCES = \
     kernel/console/console.c \
     kernel/arch/x86_64/gdt.c \
     kernel/arch/x86_64/idt.c \
-    kernel/arch/x86_64/pmm.c \
+    kernel/mm/pmm/pmm.c \
     kernel/arch/x86_64/tss.c \
-    kernel/arch/x86_64/vmm.c \
+    kernel/mm/vmm/vmm.c \
     kernel/arch/x86_64/pic.c \
     kernel/arch/x86_64/irq.c \
     kernel/arch/x86_64/pit.c \
@@ -40,7 +40,7 @@ C_SOURCES = \
     kernel/arch/x86_64/clock_event.c \
     kernel/arch/x86_64/timer.c \
     kernel/arch/x86_64/timer_manager.c \
-    kernel/arch/x86_64/heap.c \
+    kernel/mm/heap/heap.c \
     kernel/arch/x86_64/lapic.c \
     kernel/arch/x86_64/ioapic.c \
     kernel/arch/x86_64/gsi.c \

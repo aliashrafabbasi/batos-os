@@ -1,7 +1,7 @@
 #include "ioapic.h"
 
 #include "acpi.h"
-#include "pmm.h"
+#include "kernel/mm/pmm/pmm.h"
 
 #define IOAPIC_PAGE_SIZE 4096ULL
 #define IOAPIC_REGSEL_OFFSET 0x00U

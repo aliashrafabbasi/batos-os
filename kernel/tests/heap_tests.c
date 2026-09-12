@@ -3,9 +3,9 @@
 #include <limits.h>
 
 #include "kernel/console/console.h"
-#include "kernel/arch/x86_64/heap.h"
-#include "kernel/arch/x86_64/pmm.h"
-#include "kernel/arch/x86_64/vmm.h"
+#include "kernel/mm/heap/heap.h"
+#include "kernel/mm/pmm/pmm.h"
+#include "kernel/mm/vmm/vmm.h"
 
 #include "heap_tests.h"
 

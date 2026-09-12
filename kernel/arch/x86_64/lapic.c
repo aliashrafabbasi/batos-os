@@ -1,6 +1,6 @@
 #include "lapic.h"
 #include "acpi.h"
-#include "pmm.h"
+#include "kernel/mm/pmm/pmm.h"
 #include "clock_event.h"
 
 #define LAPIC_PAGE_SIZE 4096ULL

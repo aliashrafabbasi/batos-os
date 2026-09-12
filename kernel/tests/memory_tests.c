@@ -1,8 +1,8 @@
 #include <stdint.h>
 
 #include "kernel/console/console.h"
-#include "kernel/arch/x86_64/pmm.h"
-#include "kernel/arch/x86_64/vmm.h"
+#include "kernel/mm/pmm/pmm.h"
+#include "kernel/mm/vmm/vmm.h"
 
 #include "memory_tests.h"
 

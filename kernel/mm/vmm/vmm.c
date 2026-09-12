@@ -1,5 +1,5 @@
-#include "vmm.h"
-#include "pmm.h"
+#include "kernel/mm/vmm/vmm.h"
+#include "kernel/mm/pmm/pmm.h"
 
 #include <stddef.h>
 
