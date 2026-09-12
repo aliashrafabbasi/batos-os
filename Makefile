@@ -45,6 +45,7 @@ C_SOURCES = \
     kernel/arch/x86_64/ioapic.c \
     kernel/arch/x86_64/gsi.c \
     kernel/arch/x86_64/acpi.c \
+    kernel/arch/x86_64/cpu/cpu.c \
     kernel/arch/x86_64/cpu/exception.c
 
 

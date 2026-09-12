@@ -35,10 +35,10 @@ void kernel_main(void)
      */
 
     /* --------------------------------------------------------
-       GDT
+       CPU
        -------------------------------------------------------- */
 
-    gdt_init();
+    cpu_init();
 
     serial_write_string(
         "GDT READY\n"
@@ -47,12 +47,6 @@ void kernel_main(void)
     serial_write_string(
         "TSS LOADED\n"
     );
-
-    /* --------------------------------------------------------
-       IDT
-       -------------------------------------------------------- */
-
-    idt_init();
 
     serial_write_string(
         "IDT READY\n"
