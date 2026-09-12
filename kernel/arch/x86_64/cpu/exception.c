@@ -1,6 +1,6 @@
 #include "exception.h"
 
-#include "../tss.h"
+#include "tss.h"
 #include "../../../console/console.h"
 
 static uint64_t read_cr2(void)

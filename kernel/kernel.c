@@ -4,7 +4,7 @@
 #include "kernel/boot/boot.h"
 #include "kernel/platform/platform.h"
 #include "kernel/arch/x86_64/cpu/cpu.h"
-#include "kernel/arch/x86_64/tss.h"
+#include "kernel/arch/x86_64/cpu/tss.h"
 #include "kernel/mm/pmm/pmm.h"
 #include "kernel/mm/vmm/vmm.h"
 #include "kernel/arch/x86_64/interrupt/idt.h"

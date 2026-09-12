@@ -29,10 +29,10 @@ C_SOURCES = \
     kernel/tests/timer_tests.c \
     kernel/tests/acpi_tests.c \
     kernel/console/console.c \
-    kernel/arch/x86_64/gdt.c \
+    kernel/arch/x86_64/cpu/gdt.c \
     kernel/arch/x86_64/interrupt/idt.c \
     kernel/mm/pmm/pmm.c \
-    kernel/arch/x86_64/tss.c \
+    kernel/arch/x86_64/cpu/tss.c \
     kernel/mm/vmm/vmm.c \
     kernel/arch/x86_64/interrupt/pic.c \
     kernel/arch/x86_64/interrupt/irq.c \
