@@ -18,37 +18,13 @@ void interrupt_tests_lapic_bringup(void)
 
 
     serial_write_string(
-        "LAPIC BRING-UP START\n"
+        "LAPIC VERIFICATION START\n"
     );
 
-    int lapic_result = lapic_init();
-
-    if (lapic_result != 0)
-    {
-        serial_write_string(
-            "LAPIC: INITIALIZATION FAILED\n"
-        );
-
-        serial_write_string(
-            "LAPIC ERROR: "
-        );
-
-        serial_write_hex(
-            (uint64_t)(uint32_t)(-lapic_result)
-        );
-
-        serial_write_string("\n");
-        serial_write_string(
-            "CPU HALTED\n"
-        );
-
-        for (;;)
-        {
-            __asm__ volatile (
-                "cli\nhlt"
-            );
-        }
-    }
+    /*
+     * LAPIC initialization is owned by platform_init().
+     * This function verifies the resulting hardware state.
+     */
 
     serial_write_string(
         "LAPIC PHYSICAL ADDRESS: "
@@ -163,39 +139,13 @@ void interrupt_tests_run(void)
        -------------------------------------------------------- */
 
     serial_write_string(
-        "IOAPIC BRING-UP START\n"
+        "IOAPIC VERIFICATION START\n"
     );
 
-    int ioapic_result = ioapic_init();
-
-    if (ioapic_result != 0)
-    {
-        serial_write_string(
-            "IOAPIC: INITIALIZATION FAILED\n"
-        );
-
-        serial_write_string(
-            "IOAPIC ERROR: "
-        );
-
-        serial_write_hex(
-            (uint64_t)(uint32_t)(-ioapic_result)
-        );
-
-        serial_write_string("\n");
-
-        serial_write_string(
-            "CPU HALTED\n"
-        );
-
-        for (;;)
-        {
-            __asm__ volatile (
-                "cli\n"
-                "hlt"
-            );
-        }
-    }
+    /*
+     * IOAPIC initialization is owned by platform_init().
+     * This function verifies the resulting hardware state.
+     */
 
     serial_write_string(
         "IOAPIC PHYSICAL ADDRESS: "
@@ -321,39 +271,13 @@ void interrupt_tests_run(void)
        -------------------------------------------------------- */
 
     serial_write_string(
-        "GSI ROUTING BRING-UP START\n"
+        "GSI ROUTING VERIFICATION START\n"
     );
 
-    int gsi_result = gsi_init();
-
-    if (gsi_result != 0)
-    {
-        serial_write_string(
-            "GSI: INITIALIZATION FAILED\n"
-        );
-
-        serial_write_string(
-            "GSI ERROR: "
-        );
-
-        serial_write_hex(
-            (uint64_t)(uint32_t)(-gsi_result)
-        );
-
-        serial_write_string("\n");
-
-        serial_write_string(
-            "CPU HALTED\n"
-        );
-
-        for (;;)
-        {
-            __asm__ volatile (
-                "cli\n"
-                "hlt"
-            );
-        }
-    }
+    /*
+     * GSI initialization is owned by platform_init().
+     * This function verifies IRQ/GSI routing resolution.
+     */
 
     struct gsi_irq_route gsi_irq0_route;
 

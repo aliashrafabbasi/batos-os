@@ -21,7 +21,7 @@ BUILD_DIR = build
 ISO_DIR = iso_root
 
 C_SOURCES = \
-    kernel/kernel.c \
+    kernel/kernel.c kernel/platform/platform.c \
     kernel/boot/boot.c \
     kernel/tests/heap_tests.c \
     kernel/tests/memory_tests.c \

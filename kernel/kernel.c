@@ -2,7 +2,8 @@
 #include <stddef.h>
 
 #include "kernel/boot/boot.h"
-#include "kernel/arch/x86_64/gdt.h"
+#include "kernel/platform/platform.h"
+#include "kernel/arch/x86_64/cpu/cpu.h"
 #include "kernel/arch/x86_64/tss.h"
 #include "kernel/arch/x86_64/pmm.h"
 #include "kernel/arch/x86_64/vmm.h"
@@ -198,9 +199,34 @@ void kernel_main(void)
         "\nACPI DISCOVERY START\n"
     );
 
-    int acpi_result = acpi_init();
+    int platform_result = platform_init();
 
-    if (acpi_result == 0)
+    if (platform_result != 0)
+    {
+        serial_write_string(
+            "PLATFORM INITIALIZATION FAILED\n"
+        );
+
+        serial_write_string(
+            "PLATFORM ERROR CODE: "
+        );
+
+        serial_write_hex(
+            (uint64_t)(uint32_t)(-platform_result)
+        );
+
+        serial_write_string("\n");
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile ("cli\nhlt");
+        }
+    }
+
     {
         serial_write_string(
             "RSDP: FOUND\n"
@@ -515,31 +541,6 @@ void kernel_main(void)
         serial_write_string(
             "ACPI ROOT TABLE DISCOVERY: VERIFIED\n"
         );
-    }
-    else
-    {
-        serial_write_string(
-            "ACPI RSDP: FAILED\n"
-        );
-
-        serial_write_string(
-            "ACPI ERROR CODE: "
-        );
-
-        serial_write_hex(
-            (uint64_t)(uint32_t)(-acpi_result)
-        );
-
-        serial_write_string("\n");
-
-        serial_write_string(
-            "CPU HALTED\n"
-        );
-
-        for (;;)
-        {
-            __asm__ volatile ("cli\nhlt");
-        }
     }
 
     memory_tests_run();
