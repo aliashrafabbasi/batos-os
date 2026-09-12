@@ -1,5 +1,5 @@
-#include "idt.h"
-#include "tss.h"
+#include "kernel/arch/x86_64/interrupt/idt.h"
+#include "kernel/arch/x86_64/tss.h"
 
 struct idt_entry
 {

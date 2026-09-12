@@ -29,7 +29,7 @@ C_SOURCES = \
     kernel/tests/timer_tests.c \
     kernel/console/console.c \
     kernel/arch/x86_64/gdt.c \
-    kernel/arch/x86_64/idt.c \
+    kernel/arch/x86_64/interrupt/idt.c \
     kernel/mm/pmm/pmm.c \
     kernel/arch/x86_64/tss.c \
     kernel/mm/vmm/vmm.c \
@@ -50,7 +50,7 @@ C_SOURCES = \
 
 
 ASM_SOURCES = \
-    kernel/arch/x86_64/interrupts.asm
+    kernel/arch/x86_64/interrupt/interrupts.asm
 
 C_OBJECTS = $(C_SOURCES:.c=.o)
 ASM_OBJECTS = $(BUILD_DIR)/interrupts.o
@@ -64,7 +64,7 @@ all: $(BUILD_DIR)/batos.iso
 %.o: %.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(BUILD_DIR)/interrupts.o: kernel/arch/x86_64/interrupts.asm
+$(BUILD_DIR)/interrupts.o: kernel/arch/x86_64/interrupt/interrupts.asm
 	$(NASM) -f elf64 $< -o $@
 
 $(BUILD_DIR)/batos.elf: $(OBJECTS)
