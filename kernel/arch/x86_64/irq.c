@@ -1,5 +1,5 @@
 #include "irq.h"
-#include "pic.h"
+#include "kernel/arch/x86_64/interrupt/pic.h"
 #include "lapic.h"
 #include "clock_event.h"
 

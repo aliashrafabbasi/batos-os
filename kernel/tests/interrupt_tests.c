@@ -1,7 +1,7 @@
 #include <stdint.h>
 
 #include "kernel/console/console.h"
-#include "kernel/arch/x86_64/pic.h"
+#include "kernel/arch/x86_64/interrupt/pic.h"
 #include "kernel/arch/x86_64/irq.h"
 #include "kernel/arch/x86_64/lapic.h"
 #include "kernel/arch/x86_64/ioapic.h"

@@ -33,7 +33,7 @@ C_SOURCES = \
     kernel/mm/pmm/pmm.c \
     kernel/arch/x86_64/tss.c \
     kernel/mm/vmm/vmm.c \
-    kernel/arch/x86_64/pic.c \
+    kernel/arch/x86_64/interrupt/pic.c \
     kernel/arch/x86_64/irq.c \
     kernel/arch/x86_64/pit.c \
     kernel/arch/x86_64/time.c \

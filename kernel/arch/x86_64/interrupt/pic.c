@@ -1,4 +1,4 @@
-#include "pic.h"
+#include "kernel/arch/x86_64/interrupt/pic.h"
 
 static inline void outb(uint16_t port, uint8_t value)
 {
