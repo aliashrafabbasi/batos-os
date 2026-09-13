@@ -62,12 +62,14 @@ C_SOURCES = \
 
 ASM_SOURCES = \
     kernel/arch/x86_64/interrupt/interrupts.asm \
-    kernel/arch/x86_64/sched/switch.asm
+    kernel/arch/x86_64/sched/switch.asm \
+    kernel/arch/x86_64/sched/task_bootstrap.asm
 
 C_OBJECTS = $(C_SOURCES:.c=.o)
 ASM_OBJECTS = \
     $(BUILD_DIR)/interrupts.o \
-    $(BUILD_DIR)/switch.o
+    $(BUILD_DIR)/switch.o \
+    $(BUILD_DIR)/task_bootstrap.o
 
 OBJECTS = $(C_OBJECTS) $(ASM_OBJECTS)
 
@@ -82,6 +84,9 @@ $(BUILD_DIR)/interrupts.o: kernel/arch/x86_64/interrupt/interrupts.asm
 	$(NASM) -f elf64 $< -o $@
 
 $(BUILD_DIR)/switch.o: kernel/arch/x86_64/sched/switch.asm
+	$(NASM) -f elf64 $< -o $@
+
+$(BUILD_DIR)/task_bootstrap.o: kernel/arch/x86_64/sched/task_bootstrap.asm
 	$(NASM) -f elf64 $< -o $@
 
 $(BUILD_DIR)/batos.elf: $(OBJECTS)

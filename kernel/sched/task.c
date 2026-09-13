@@ -166,16 +166,58 @@ static int task_unmap_stack(struct task *task)
     return result;
 }
 
-static void task_bootstrap(void)
+static task_exit_handler_t task_exit_handler = NULL;
+
+extern void x86_64_task_bootstrap_trampoline(void);
+
+void task_bootstrap_entry(struct task *current)
 {
+
+    if (current == NULL ||
+        current->state != TASK_STATE_RUNNING ||
+        current->entry == NULL)
+    {
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt\n"
+            );
+        }
+    }
+
+    current->entry(
+        current->argument
+    );
+
+    if (task_exit(current) != 0)
+    {
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt\n"
+            );
+        }
+    }
+
     /*
-     * Scheduler dispatch will invoke this context in a later
-     * milestone. The task entry/argument execution protocol
-     * is intentionally not dispatched from task creation.
-     *
-     * Until scheduler dispatch exists, entering this address
-     * is considered an invalid execution path.
+     * A terminated task must never return through its bootstrap
+     * stack. The registered execution owner performs the
+     * control-flow handoff to the next runnable task.
      */
+    if (task_exit_handler == NULL ||
+        task_exit_handler(current) != 0)
+    {
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt\n"
+            );
+        }
+    }
+
     for (;;)
     {
         __asm__ volatile (
@@ -236,21 +278,59 @@ int task_create(
     /*
      * Reserve the ABI return-address slot.
      */
-    uint64_t stack_top =
+    /*
+     * Reserve a bootstrap return slot and an explicit task pointer.
+     *
+     * The task stack top is 16-byte aligned. Using top - 24 gives the
+     * trampoline an RSP value congruent to 8 mod 16, matching the
+     * SysV AMD64 function-entry contract.
+     *
+     * The task pointer remains inside the mapped stack rather than
+     * being written one word beyond the mapped stack.
+     */
+    uint64_t stack_pointer =
         task->kernel_stack_top -
-        sizeof(uint64_t);
+        3ULL * sizeof(uint64_t);
 
-    *(uint64_t *)(uintptr_t)stack_top =
-        (uint64_t)(uintptr_t)task_bootstrap;
+    *(uint64_t *)(uintptr_t)stack_pointer = 0;
 
-    task->context.rsp =
-        stack_top;
+    *(uint64_t *)(uintptr_t)(
+        stack_pointer + sizeof(uint64_t)
+    ) = (uint64_t)(uintptr_t)task;
+
+    task->context.rsp = stack_pointer;
 
     task->context.rip =
-        (uint64_t)(uintptr_t)task_bootstrap;
+        (uint64_t)(uintptr_t)
+            x86_64_task_bootstrap_trampoline;
 
     task->state =
         TASK_STATE_READY;
+
+    return 0;
+}
+
+int task_set_exit_handler(
+    task_exit_handler_t handler
+)
+{
+    if (handler == NULL)
+        return -1;
+
+    task_exit_handler = handler;
+    return 0;
+}
+
+int task_exit(struct task *task)
+{
+    if (task == NULL)
+        return -1;
+
+    if (task->state != TASK_STATE_RUNNING)
+        return -1;
+
+    task->state =
+        TASK_STATE_TERMINATED;
 
     return 0;
 }

@@ -18,7 +18,12 @@ int scheduler_init(void)
     scheduler_current = NULL;
     scheduler_dispatch_count = 0;
 
-    return runqueue_init();
+    if (runqueue_init() != 0)
+        return -1;
+
+    return task_set_exit_handler(
+        scheduler_exit_current
+    );
 }
 
 struct task *scheduler_get_current(void)
@@ -105,6 +110,57 @@ int scheduler_yield(void)
         runqueue_remove(current);
         current->state = TASK_STATE_RUNNING;
         return -5;
+    }
+
+    next->state = TASK_STATE_RUNNING;
+    scheduler_current = next;
+    scheduler_dispatch_count++;
+
+    x86_64_context_switch(
+        &current->context,
+        &next->context
+    );
+
+    return 0;
+}
+
+int scheduler_exit_current(struct task *task)
+{
+    struct task *current = scheduler_current;
+    struct task *next;
+
+    if (task == NULL || task != current)
+    {
+        return -1;
+    }
+
+    if (current->state != TASK_STATE_TERMINATED)
+    {
+        return -2;
+    }
+
+    next = scheduler_select_next();
+
+    if (next == NULL)
+    {
+        /*
+         * No runnable task remains. The terminated task cannot
+         * return through its own stack, so there is no valid
+         * continuation. Halt until a future scheduler/reaper
+         * integration provides one.
+         */
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt\n"
+            );
+        }
+    }
+
+    if (next->state != TASK_STATE_READY)
+    {
+        return -3;
     }
 
     next->state = TASK_STATE_RUNNING;

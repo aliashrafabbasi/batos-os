@@ -26,7 +26,10 @@ enum task_state
     TASK_STATE_TERMINATED
 };
 
+struct task;
+
 typedef void (*task_entry_t)(void *argument);
+typedef int (*task_exit_handler_t)(struct task *task);
 
 struct task
 {
@@ -62,6 +65,14 @@ int task_create(
     uint64_t address_space,
     task_entry_t entry,
     void *argument
+);
+
+int task_set_exit_handler(
+    task_exit_handler_t handler
+);
+
+int task_exit(
+    struct task *task
 );
 
 int task_destroy(
