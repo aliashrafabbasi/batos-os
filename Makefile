@@ -29,6 +29,7 @@ C_SOURCES = \
     kernel/tests/timer_tests.c \
     kernel/tests/timer_bringup_tests.c \
     kernel/tests/acpi_tests.c \
+    kernel/tests/context_tests.c \
     kernel/console/console.c \
     kernel/arch/x86_64/cpu/gdt.c \
     kernel/arch/x86_64/interrupt/idt.c \
@@ -52,10 +53,13 @@ C_SOURCES = \
 
 
 ASM_SOURCES = \
-    kernel/arch/x86_64/interrupt/interrupts.asm
+    kernel/arch/x86_64/interrupt/interrupts.asm \
+    kernel/arch/x86_64/sched/switch.asm
 
 C_OBJECTS = $(C_SOURCES:.c=.o)
-ASM_OBJECTS = $(BUILD_DIR)/interrupts.o
+ASM_OBJECTS = \
+    $(BUILD_DIR)/interrupts.o \
+    $(BUILD_DIR)/switch.o
 
 OBJECTS = $(C_OBJECTS) $(ASM_OBJECTS)
 
@@ -67,6 +71,9 @@ all: $(BUILD_DIR)/batos.iso
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(BUILD_DIR)/interrupts.o: kernel/arch/x86_64/interrupt/interrupts.asm
+	$(NASM) -f elf64 $< -o $@
+
+$(BUILD_DIR)/switch.o: kernel/arch/x86_64/sched/switch.asm
 	$(NASM) -f elf64 $< -o $@
 
 $(BUILD_DIR)/batos.elf: $(OBJECTS)

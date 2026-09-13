@@ -14,6 +14,7 @@
 #include "kernel/tests/timer_tests.h"
 #include "kernel/tests/timer_bringup_tests.h"
 #include "kernel/tests/acpi_tests.h"
+#include "kernel/tests/context_tests.h"
 
 void kernel_main(void)
 {
@@ -232,6 +233,18 @@ void kernel_main(void)
      * Timer-4 observes the live periodic LAPIC clock.
      */
     timer_tests_run();
+
+    /*
+     * Cooperative x86_64 context-switch primitive verification.
+     *
+     * This validates save/restore of a running context before
+     * scheduler/task abstractions are introduced.
+     */
+    context_tests_run();
+
+    serial_write_string(
+        "CONTEXT SWITCH: VERIFIED\n"
+    );
 
     serial_write_string(
         "TIMER-4 LAPIC CLOCK MIGRATION: ARMED\n"
