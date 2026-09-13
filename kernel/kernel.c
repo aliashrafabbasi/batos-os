@@ -16,6 +16,7 @@
 #include "kernel/tests/acpi_tests.h"
 #include "kernel/tests/context_tests.h"
 #include "kernel/tests/task_tests.h"
+#include "kernel/tests/task_registry_tests.h"
 
 void kernel_main(void)
 {
@@ -244,6 +245,7 @@ void kernel_main(void)
     context_tests_run();
 
     task_tests_run();
+    task_registry_tests_run();
 
     serial_write_string(
         "CONTEXT SWITCH: VERIFIED\n"

@@ -31,6 +31,7 @@ C_SOURCES = \
     kernel/tests/acpi_tests.c \
     kernel/tests/context_tests.c \
     kernel/tests/task_tests.c \
+    kernel/tests/task_registry_tests.c \
     kernel/console/console.c \
     kernel/arch/x86_64/cpu/gdt.c \
     kernel/arch/x86_64/interrupt/idt.c \
@@ -46,6 +47,7 @@ C_SOURCES = \
     kernel/arch/x86_64/time/timer_manager.c \
     kernel/mm/heap/heap.c \
     kernel/sched/task.c \
+    kernel/sched/task_registry.c \
     kernel/arch/x86_64/apic/lapic.c \
     kernel/arch/x86_64/apic/ioapic.c \
     kernel/arch/x86_64/apic/gsi.c \
