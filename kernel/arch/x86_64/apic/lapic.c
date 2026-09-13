@@ -2,6 +2,7 @@
 #include "kernel/arch/x86_64/acpi/acpi.h"
 #include "kernel/mm/pmm/pmm.h"
 #include "kernel/arch/x86_64/time/clock_event.h"
+#include "kernel/arch/x86_64/interrupt/irq.h"
 
 #define LAPIC_PAGE_SIZE 4096ULL
 
@@ -183,13 +184,23 @@ void lapic_eoi(void)
  * Timekeeping and scheduler logic will be layered
  * above this primitive later.
  */
-void lapic_timer_interrupt(void)
+void lapic_timer_interrupt(
+    struct irq_frame *frame
+)
 {
+    if (frame == 0)
+    {
+        return;
+    }
+
+    if (frame->vector != LAPIC_LVT_TIMER_VECTOR)
+    {
+        return;
+    }
+
     lapic_timer_interrupt_count++;
 
     clock_event_notify();
-
-    lapic_eoi();
 }
 
 /*

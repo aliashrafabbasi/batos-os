@@ -3,6 +3,8 @@
 
 #include <stdint.h>
 
+struct irq_frame;
+
 #define LAPIC_REG_ID       0x020
 #define LAPIC_REG_VERSION  0x030
 #define LAPIC_REG_SVR      0x0F0
@@ -31,12 +33,14 @@ void lapic_write(uint32_t offset, uint32_t value);
 void lapic_eoi(void);
 
 /*
- * LAPIC timer interrupt entry point.
+ * LAPIC timer interrupt handler.
  *
- * Called directly by the dedicated assembly
- * LAPIC timer interrupt stub.
+ * The dedicated assembly stub provides a C-visible
+ * interrupt frame matching struct irq_frame.
  */
-void lapic_timer_interrupt(void);
+void lapic_timer_interrupt(
+    struct irq_frame *frame
+);
 
 uint64_t lapic_timer_get_interrupt_count(void);
 

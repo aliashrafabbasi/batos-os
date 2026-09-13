@@ -467,6 +467,7 @@ global lapic_spurious_stub
 
 extern irq_dispatch
 extern lapic_timer_interrupt
+extern lapic_eoi
 
 
 irq_common:
@@ -604,6 +605,17 @@ irq_stub_15:
 lapic_timer_stub:
     cld
 
+; CPU provides:
+;   RIP -> CS -> RFLAGS
+;
+; Push the synthetic LAPIC timer vector first.
+; After saving the GPRs, memory exactly matches
+; struct irq_frame:
+;
+;   r15..rax -> vector -> RIP -> CS -> RFLAGS
+
+    push 0xF0
+
     push rax
     push rbx
     push rcx
@@ -620,12 +632,93 @@ lapic_timer_stub:
     push r14
     push r15
 
+    mov rdi, rsp
     mov rbx, rsp
     and rsp, -16
 
     call lapic_timer_interrupt
 
     mov rsp, rbx
+
+; Complete the Local APIC interrupt at the
+; interrupt-exit boundary, before restoring
+; the interrupted CPU state.
+    call lapic_eoi
+
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop r11
+    pop r10
+    pop r9
+    pop r8
+    pop rdi
+    pop rsi
+    pop rbp
+    pop rdx
+    pop rcx
+    pop rbx
+    pop rax
+
+    add rsp, 8
+    iretq
+
+; Build the same C-visible frame shape used by
+; struct irq_frame.
+;
+; The Local APIC timer has no CPU error-code slot.
+; Its explicit vector is written after the saved GPRs
+; so the frame is:
+;
+;   GPRs -> vector -> RIP -> CS -> RFLAGS
+
+    push rax
+    push rbx
+    push rcx
+    push rdx
+    push rbp
+    push rsi
+    push rdi
+    push r8
+    push r9
+    push r10
+    push r11
+    push r12
+    push r13
+    push r14
+    push r15
+
+; Reserve the vector slot between the saved GPRs
+; and the CPU-provided interrupt frame.
+    sub rsp, 8
+
+; Reserve slot is the explicit vector field.
+; The saved GPRs begin immediately above it.
+    mov qword [rsp], 0xF0
+
+; struct irq_frame begins at the first saved GPR.
+    lea rdi, [rsp + 8]
+    mov rbx, rsp
+    and rsp, -16
+
+    call lapic_timer_interrupt
+
+    mov rsp, rbx
+
+; Complete the Local APIC interrupt at the
+; interrupt-exit boundary, before iretq.
+    call lapic_eoi
+
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop r11
+    pop r10
+    pop r9
+    pop r8
+    add rsp, 8
 
     pop r15
     pop r14
