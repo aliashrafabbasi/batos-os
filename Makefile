@@ -33,6 +33,7 @@ C_SOURCES = \
     kernel/tests/task_tests.c \
     kernel/tests/task_registry_tests.c \
     kernel/tests/runqueue_tests.c \
+    kernel/tests/scheduler_tests.c \
     kernel/console/console.c \
     kernel/arch/x86_64/cpu/gdt.c \
     kernel/arch/x86_64/interrupt/idt.c \
@@ -50,6 +51,7 @@ C_SOURCES = \
     kernel/sched/task.c \
     kernel/sched/task_registry.c \
     kernel/sched/runqueue.c \
+    kernel/sched/scheduler.c \
     kernel/arch/x86_64/apic/lapic.c \
     kernel/arch/x86_64/apic/ioapic.c \
     kernel/arch/x86_64/apic/gsi.c \
