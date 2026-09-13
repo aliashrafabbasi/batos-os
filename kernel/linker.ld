@@ -68,6 +68,32 @@ SECTIONS
     __heap_start = .;
 
     /*
+     * Dedicated virtual address window for kernel task stacks.
+     *
+     * Each task receives:
+     *
+     *     4 mapped stack pages
+     *     1 unmapped guard page
+     *
+     * Physical backing is allocated dynamically by PMM and
+     * mapped through VMM.
+     */
+    . = __heap_start + (64K);
+    . = ALIGN(4K);
+    __task_stack_start = .;
+
+    /*
+     * Reserve virtual space only.
+     *
+     * TASK_MAX_TASKS * TASK_KERNEL_STACK_SLOT_SIZE
+     * = 256 * 20 KiB
+     * = 5 MiB.
+     */
+    . = __task_stack_start + (5M);
+    . = ALIGN(4K);
+    __task_stack_end = .;
+
+    /*
      * Kernel does not need these sections.
      */
     /DISCARD/ :
