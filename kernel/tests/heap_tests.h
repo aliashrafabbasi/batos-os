@@ -4,5 +4,6 @@
 void heap_test_bootstrap(void);
 void heap_test_dynamic_page_ownership(void);
 void heap_test_dynamic_kernel_page(void);
+void heap_tests_run(void);
 
 #endif

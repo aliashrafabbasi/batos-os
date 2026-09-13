@@ -219,9 +219,7 @@ void kernel_main(void)
 
     memory_tests_run();
 
-    heap_test_dynamic_kernel_page();
-    heap_test_bootstrap();
-    heap_test_dynamic_page_ownership();
+    heap_tests_run();
 
     interrupt_tests_lapic_bringup();
 

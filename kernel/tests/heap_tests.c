@@ -1248,3 +1248,10 @@ void heap_test_dynamic_kernel_page(void)
         "HEAP-1B.1: DYNAMIC KERNEL PAGE VERIFIED\n"
     );
 }
+
+void heap_tests_run(void)
+{
+    heap_test_dynamic_kernel_page();
+    heap_test_bootstrap();
+    heap_test_dynamic_page_ownership();
+}
