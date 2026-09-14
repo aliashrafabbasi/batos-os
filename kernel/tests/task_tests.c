@@ -27,6 +27,8 @@ static uint64_t task_execution_expected_argument =
 static void task_execution_test_a(void *argument);
 static void task_execution_test_b(void *argument);
 
+extern void x86_64_task_bootstrap_trampoline(void);
+
 static void task_test_entry(void *argument)
 {
     (void)argument;
@@ -92,6 +94,33 @@ void task_tests_run(void)
             "TASK CREATE: INVALID\n"
         );
     }
+
+    /*
+     * Verify the initial bootstrap context ABI:
+     *
+     *   RSP % 16 == 8
+     *   [RSP + 0] == 0
+     *   [RSP + 8] == task
+     *   RIP == bootstrap trampoline
+     */
+    uint64_t bootstrap_rsp = task.context.rsp;
+
+    if ((bootstrap_rsp & 0xFULL) != 8 ||
+        *(uint64_t *)(uintptr_t)bootstrap_rsp != 0 ||
+        *(uint64_t *)(uintptr_t)(bootstrap_rsp +
+                                 sizeof(uint64_t)) !=
+            (uint64_t)(uintptr_t)&task ||
+        task.context.rip !=
+            (uint64_t)(uintptr_t)x86_64_task_bootstrap_trampoline)
+    {
+        task_test_fail(
+            "TASK BOOTSTRAP STACK: INVALID\n"
+        );
+    }
+
+    serial_write_string(
+        "TASK BOOTSTRAP STACK: VERIFIED\n"
+    );
 
     /*
      * Verify every stack page has a VMM translation.
