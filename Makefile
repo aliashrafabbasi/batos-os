@@ -42,6 +42,7 @@ C_SOURCES = \
     kernel/mm/vmm/vmm.c \
     kernel/arch/x86_64/interrupt/pic.c \
     kernel/arch/x86_64/interrupt/irq.c \
+    kernel/arch/x86_64/interrupt/irq_routing.c \
     kernel/arch/x86_64/time/pit.c \
     kernel/arch/x86_64/time/time.c \
     kernel/arch/x86_64/time/clock_event.c \

@@ -52,7 +52,7 @@ int irq_set_controller(
 
 enum irq_controller irq_get_controller(uint8_t irq);
 
-uint64_t irq_get_ticks(void);
+uint64_t irq_get_irq0_delivery_count(void);
 
 
 #endif

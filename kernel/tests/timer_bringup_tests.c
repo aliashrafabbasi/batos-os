@@ -1,9 +1,8 @@
 #include <stdint.h>
 
 #include "kernel/arch/x86_64/apic/lapic.h"
-#include "kernel/arch/x86_64/apic/ioapic.h"
-#include "kernel/arch/x86_64/apic/gsi.h"
 #include "kernel/arch/x86_64/interrupt/irq.h"
+#include "kernel/arch/x86_64/interrupt/irq_routing.h"
 #include "kernel/tests/interrupt_tests.h"
 #include "kernel/arch/x86_64/time/pit.h"
 #include "kernel/arch/x86_64/time/time.h"
@@ -315,7 +314,140 @@ serial_write_string(
     "CLOCK EVENT: READY\n"
 );
 
-interrupt_test_irq0_lapic_delivery();
+/*
+ * Activate the established IRQ0 route for the temporary PIT
+ * reference source.
+ *
+ * Routing ownership remains in irq_routing.c. Timer policy
+ * only controls whether the already-established route can
+ * deliver the active clock source.
+ */
+__asm__ volatile (
+    "cli"
+    :
+    :
+    : "memory"
+);
+
+if (irq_routing_set_irq0_masked(0) != 0)
+{
+    serial_write_string(
+        "IRQ0 PIT ACTIVATION: FAILED\n"
+    );
+
+    serial_write_string("CPU HALTED\n");
+
+    for (;;)
+    {
+        __asm__ volatile ("cli\nhlt");
+    }
+}
+
+serial_write_string(
+    "IRQ0 PIT ACTIVATION: VERIFIED\n"
+);
+
+uint64_t irq0_test_start =
+    irq_get_irq0_delivery_count();
+
+uint64_t time_test_start =
+    time_get_ticks();
+
+uint64_t uptime_test_start =
+    time_get_uptime_ms();
+
+__asm__ volatile (
+    "sti"
+    :
+    :
+    : "memory"
+);
+
+while (irq_get_irq0_delivery_count() <
+       irq0_test_start + 100)
+{
+    __asm__ volatile (
+        "hlt"
+        :
+        :
+        : "memory"
+    );
+}
+
+__asm__ volatile (
+    "cli"
+    :
+    :
+    : "memory"
+);
+
+uint64_t irq0_test_end =
+    irq_get_irq0_delivery_count();
+
+uint64_t time_test_end =
+    time_get_ticks();
+
+uint64_t uptime_test_end =
+    time_get_uptime_ms();
+
+serial_write_string(
+    "IRQ0 TEST START TICKS: "
+);
+serial_write_hex(irq0_test_start);
+serial_write_string("\n");
+
+serial_write_string(
+    "IRQ0 TEST END TICKS: "
+);
+serial_write_hex(irq0_test_end);
+serial_write_string("\n");
+
+serial_write_string(
+    "TIMEKEEPING END TICKS: "
+);
+serial_write_hex(time_test_end);
+serial_write_string("\n");
+
+serial_write_string(
+    "TIMEKEEPING END UPTIME MS: "
+);
+serial_write_hex(uptime_test_end);
+serial_write_string("\n");
+
+if (irq0_test_end >= irq0_test_start + 100 &&
+    time_test_end >= time_test_start + 100 &&
+    uptime_test_end >= uptime_test_start + 1000)
+{
+    serial_write_string(
+        "IRQ0 TIMER: VERIFIED\n"
+    );
+
+    serial_write_string(
+        "HARDWARE INTERRUPTS: VERIFIED\n"
+    );
+}
+else
+{
+    serial_write_string(
+        "IRQ0 TIMER: FAILED\n"
+    );
+
+    serial_write_string(
+        "HARDWARE INTERRUPTS: FAILED\n"
+    );
+
+    serial_write_string("CPU HALTED\n");
+
+    for (;;)
+    {
+        __asm__ volatile ("cli\nhlt");
+    }
+}
+
+serial_write_string(
+    "PIT 100HZ REFERENCE: ACTIVE\n"
+);
+
 
 
 /* --------------------------------------------------------
@@ -388,7 +520,7 @@ uint32_t lapic_calibration_start_count =
     lapic_timer_get_current_count();
 
 uint64_t lapic_calibration_start_ticks =
-    irq_get_ticks();
+    irq_get_irq0_delivery_count();
 
 serial_write_string(
     "LAPIC CALIBRATION START COUNT: "
@@ -421,7 +553,7 @@ const uint64_t lapic_calibration_reference_ticks =
     20;
 
 while (
-    irq_get_ticks() <
+    irq_get_irq0_delivery_count() <
     lapic_calibration_start_ticks +
     lapic_calibration_reference_ticks
 )
@@ -449,7 +581,7 @@ uint32_t lapic_calibration_end_count =
     lapic_timer_get_current_count();
 
 uint64_t lapic_calibration_end_ticks =
-    irq_get_ticks();
+    irq_get_irq0_delivery_count();
 
 serial_write_string(
     "LAPIC CALIBRATION END COUNT: "
@@ -637,8 +769,9 @@ serial_write_string(
  *   1. CLI
  *   2. Configure LAPIC periodic timer while masked
  *   3. Switch clock-event ownership to LAPIC
- *   4. Mask PIT IRQ0 at IOAPIC
- *   5. Verify PIT IRQ0 is masked
+ *   4. Disable PIT-originated IRQ0 delivery through the
+ *      production IRQ-routing interface
+ *   5. Verify the routing transition succeeds
  *   6. Unmask LAPIC timer
  *   7. STI
  *
@@ -650,32 +783,6 @@ serial_write_string(
     "TIMER-4 LAPIC CLOCK MIGRATION START\n"
 );
 
-
-struct gsi_irq_route timer4_gsi_irq0_route;
-
-if (gsi_resolve_irq(
-        0,
-        &timer4_gsi_irq0_route
-    ) != 0)
-{
-    serial_write_string(
-        "TIMER-4 GSI IRQ0 ROUTE: FAILED\n"
-    );
-
-    serial_write_string("CPU HALTED\n");
-
-    for (;;)
-    {
-        __asm__ volatile ("cli\nhlt");
-    }
-}
-
-__asm__ volatile (
-    "cli"
-    :
-    :
-    : "memory"
-);
 
 /*
  * Program the calibrated LAPIC timer in periodic mode.
@@ -745,75 +852,17 @@ serial_write_string(
 );
 
 /*
- * Mask PIT IRQ0 at the IOAPIC.
+ * Disable PIT-originated IRQ0 delivery through the
+ * production IRQ-routing interface.
  *
- * Preserve the complete existing routing entry and change
- * only the mask bit. The ACPI-resolved GSI route is reused.
+ * Timer policy changes only the delivery state of the
+ * already-established route; routing ownership remains
+ * inside the interrupt-routing subsystem.
  */
-uint64_t timer4_pit_redirection = 0;
-
-if (ioapic_read_redirection_at(
-        timer4_gsi_irq0_route.ioapic_index,
-        (uint8_t)timer4_gsi_irq0_route.ioapic_redirection_index,
-        &timer4_pit_redirection
-    ) != 0)
-{
-    serial_write_string(
-        "TIMER-4 PIT IRQ0 READ: FAILED\n"
-    );
-
-    serial_write_string("CPU HALTED\n");
-
-    for (;;)
-    {
-        __asm__ volatile ("cli\nhlt");
-    }
-}
-
-timer4_pit_redirection |= IOAPIC_REDIR_MASKED;
-
-if (ioapic_write_redirection_at(
-        timer4_gsi_irq0_route.ioapic_index,
-        (uint8_t)timer4_gsi_irq0_route.ioapic_redirection_index,
-        timer4_pit_redirection
-    ) != 0)
+if (irq_routing_set_irq0_masked(1) != 0)
 {
     serial_write_string(
         "TIMER-4 PIT IRQ0 MASK: FAILED\n"
-    );
-
-    serial_write_string("CPU HALTED\n");
-
-    for (;;)
-    {
-        __asm__ volatile ("cli\nhlt");
-    }
-}
-
-uint64_t timer4_pit_readback = 0;
-
-if (ioapic_read_redirection_at(
-        timer4_gsi_irq0_route.ioapic_index,
-        (uint8_t)timer4_gsi_irq0_route.ioapic_redirection_index,
-        &timer4_pit_readback
-    ) != 0)
-{
-    serial_write_string(
-        "TIMER-4 PIT IRQ0 READBACK: FAILED\n"
-    );
-
-    serial_write_string("CPU HALTED\n");
-
-    for (;;)
-    {
-        __asm__ volatile ("cli\nhlt");
-    }
-}
-
-if ((timer4_pit_readback & IOAPIC_REDIR_MASKED) == 0)
-{
-    serial_write_string(
-        "TIMER-4 PIT IRQ0 MASK READBACK: FAILED\n"
     );
 
     serial_write_string("CPU HALTED\n");

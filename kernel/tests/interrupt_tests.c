@@ -1,7 +1,6 @@
 #include <stdint.h>
 
 #include "kernel/console/console.h"
-#include "kernel/arch/x86_64/interrupt/pic.h"
 #include "kernel/arch/x86_64/interrupt/irq.h"
 #include "kernel/arch/x86_64/apic/lapic.h"
 #include "kernel/arch/x86_64/apic/ioapic.h"
@@ -397,21 +396,18 @@ void interrupt_tests_run(void)
     );
 
     /* --------------------------------------------------------
-       STAGE 3: MASKED IOAPIC REDIRECTION PROGRAMMING
+       STAGE 3: PRODUCTION IOAPIC ROUTING VERIFICATION
        --------------------------------------------------------
 
-       Program the already-verified IRQ0 route:
+       irq_routing_init() owns IRQ0 redirection programming.
 
-           IRQ0 -> GSI2 -> IOAPIC0 -> REDIR[2]
-
-       The entry is deliberately kept MASKED.
-       This stage verifies only redirection programming and
-       exact hardware readback. Interrupt delivery is NOT
-       enabled or migrated here.
+       This test only reads the established route and verifies
+       that the production configuration matches the ACPI
+       resolved route and LAPIC destination.
        -------------------------------------------------------- */
 
     serial_write_string(
-        "IOAPIC STAGE 3: MASKED REDIRECTION START\n"
+        "IOAPIC STAGE 3: ROUTING VERIFICATION START\n"
     );
 
     uint32_t stage3_ioapic_index =
@@ -428,292 +424,102 @@ void interrupt_tests_run(void)
     uint8_t stage3_lapic_id =
         (uint8_t)(lapic_id >> 24);
 
-    /*
-     * Construct the complete 64-bit redirection entry.
-     *
-     * Vector:
-     *     bits 7:0 = 0x50
-     *
-     * Delivery mode:
-     *     bits 10:8 = Fixed
-     *
-     * Destination mode:
-     *     bit 11 = Physical
-     *
-     * Polarity:
-     *     bit 13 = Active High
-     *
-     * Trigger:
-     *     bit 15 = Edge
-     *
-     * Mask:
-     *     bit 16 = MASKED
-     *
-     * Destination:
-     *     bits 63:56 = current LAPIC ID
-     */
     uint64_t stage3_expected =
-        IOAPIC_STAGE3_TEST_VECTOR |
+        (IRQ_VECTOR_BASE + 0U) |
         IOAPIC_REDIR_DELIVERY_FIXED |
         IOAPIC_REDIR_MASKED |
         ((uint64_t)stage3_lapic_id << 56);
 
-    serial_write_string(
-        "IOAPIC STAGE 3 ROUTE: IRQ0 -> GSI2 -> IOAPIC="
-    );
+    if (gsi_irq0_route.polarity == GSI_POLARITY_LOW)
+    {
+        stage3_expected |= IOAPIC_REDIR_POLARITY_LOW;
+    }
+    else if (gsi_irq0_route.polarity != GSI_POLARITY_HIGH)
+    {
+        serial_write_string(
+            "IOAPIC STAGE 3 POLARITY: FAILED\n"
+        );
 
-    serial_write_hex(
-        (uint64_t)stage3_ioapic_index
-    );
+        serial_write_string("CPU HALTED\n");
 
-    serial_write_string(
-        " REDIR="
-    );
+        for (;;)
+        {
+            __asm__ volatile ("cli\nhlt");
+        }
+    }
 
-    serial_write_hex(
-        (uint64_t)stage3_redirection_index
-    );
+    if (gsi_irq0_route.trigger_mode == GSI_TRIGGER_LEVEL)
+    {
+        stage3_expected |= IOAPIC_REDIR_TRIGGER_LEVEL;
+    }
+    else if (gsi_irq0_route.trigger_mode != GSI_TRIGGER_EDGE)
+    {
+        serial_write_string(
+            "IOAPIC STAGE 3 TRIGGER: FAILED\n"
+        );
 
-    serial_write_string("\n");
+        serial_write_string("CPU HALTED\n");
 
-    serial_write_string(
-        "IOAPIC STAGE 3 VECTOR: "
-    );
+        for (;;)
+        {
+            __asm__ volatile ("cli\nhlt");
+        }
+    }
 
-    serial_write_hex(
-        (uint64_t)IOAPIC_STAGE3_TEST_VECTOR
-    );
+    uint64_t stage3_actual = 0;
 
-    serial_write_string("\n");
+    if (ioapic_read_redirection_at(
+            stage3_ioapic_index,
+            stage3_redirection_index,
+            &stage3_actual
+        ) != 0)
+    {
+        serial_write_string(
+            "IOAPIC STAGE 3 READBACK: FAILED\n"
+        );
 
-    serial_write_string(
-        "IOAPIC STAGE 3 LAPIC DESTINATION: "
-    );
+        serial_write_string("CPU HALTED\n");
 
-    serial_write_hex(
-        (uint64_t)stage3_lapic_id
-    );
-
-    serial_write_string("\n");
+        for (;;)
+        {
+            __asm__ volatile ("cli\nhlt");
+        }
+    }
 
     serial_write_string(
         "IOAPIC STAGE 3 EXPECTED: "
     );
-
-    serial_write_hex(
-        stage3_expected
-    );
-
+    serial_write_hex(stage3_expected);
     serial_write_string("\n");
-
-    /*
-     * The expected value explicitly contains MASKED=1.
-     * Verify that before touching hardware.
-     */
-    if ((stage3_expected & IOAPIC_REDIR_MASKED) == 0)
-    {
-        serial_write_string(
-            "IOAPIC STAGE 3 MASK: FAILED\n"
-        );
-
-        serial_write_string(
-            "CPU HALTED\n"
-        );
-
-        for (;;)
-        {
-            __asm__ volatile (
-                "cli\n"
-                "hlt"
-            );
-        }
-    }
-
-    serial_write_string(
-        "IOAPIC STAGE 3 MASK: PRESERVED\n"
-    );
-
-    /*
-     * Program the entry.
-     *
-     * ioapic_write_redirection_at() writes the HIGH dword
-     * first and the LOW dword second.
-     *
-     * The LOW dword contains MASKED=1, so interrupt delivery
-     * remains disabled after programming.
-     */
-    int stage3_write_result =
-        ioapic_write_redirection_at(
-            stage3_ioapic_index,
-            stage3_redirection_index,
-            stage3_expected
-        );
-
-    if (stage3_write_result != 0)
-    {
-        serial_write_string(
-            "IOAPIC STAGE 3 WRITE: FAILED\n"
-        );
-
-        serial_write_string(
-            "IOAPIC ERROR: "
-        );
-
-        serial_write_hex(
-            (uint64_t)(uint32_t)(-stage3_write_result)
-        );
-
-        serial_write_string("\n");
-
-        serial_write_string(
-            "CPU HALTED\n"
-        );
-
-        for (;;)
-        {
-            __asm__ volatile (
-                "cli\n"
-                "hlt"
-            );
-        }
-    }
-
-    serial_write_string(
-        "IOAPIC STAGE 3 WRITE: OK\n"
-    );
-
-    /*
-     * Read the complete entry back from hardware.
-     */
-    uint64_t stage3_actual = 0;
-
-    int stage3_read_result =
-        ioapic_read_redirection_at(
-            stage3_ioapic_index,
-            stage3_redirection_index,
-            &stage3_actual
-        );
-
-    if (stage3_read_result != 0)
-    {
-        serial_write_string(
-            "IOAPIC STAGE 3 READBACK: FAILED\n"
-        );
-
-        serial_write_string(
-            "IOAPIC ERROR: "
-        );
-
-        serial_write_hex(
-            (uint64_t)(uint32_t)(-stage3_read_result)
-        );
-
-        serial_write_string("\n");
-
-        serial_write_string(
-            "CPU HALTED\n"
-        );
-
-        for (;;)
-        {
-            __asm__ volatile (
-                "cli\n"
-                "hlt"
-            );
-        }
-    }
 
     serial_write_string(
         "IOAPIC STAGE 3 ACTUAL: "
     );
-
-    serial_write_hex(
-        stage3_actual
-    );
-
+    serial_write_hex(stage3_actual);
     serial_write_string("\n");
 
-    /*
-     * Exact 64-bit comparison.
-     */
-    if (stage3_actual != stage3_expected)
+    if (stage3_actual != stage3_expected ||
+        (stage3_actual & IOAPIC_REDIR_MASKED) == 0)
     {
         serial_write_string(
-            "IOAPIC STAGE 3 READBACK: FAILED\n"
+            "IOAPIC STAGE 3 ROUTING: FAILED\n"
         );
 
-        serial_write_string(
-            "IOAPIC EXPECTED: "
-        );
-
-        serial_write_hex(
-            stage3_expected
-        );
-
-        serial_write_string("\n");
-
-        serial_write_string(
-            "IOAPIC ACTUAL: "
-        );
-
-        serial_write_hex(
-            stage3_actual
-        );
-
-        serial_write_string("\n");
-
-        serial_write_string(
-            "CPU HALTED\n"
-        );
+        serial_write_string("CPU HALTED\n");
 
         for (;;)
         {
-            __asm__ volatile (
-                "cli\n"
-                "hlt"
-            );
-        }
-    }
-
-    /*
-     * Independently verify the hardware readback still has
-     * the MASKED bit set.
-     */
-    if ((stage3_actual & IOAPIC_REDIR_MASKED) == 0)
-    {
-        serial_write_string(
-            "IOAPIC STAGE 3 MASK READBACK: FAILED\n"
-        );
-
-        serial_write_string(
-            "CPU HALTED\n"
-        );
-
-        for (;;)
-        {
-            __asm__ volatile (
-                "cli\n"
-                "hlt"
-            );
+            __asm__ volatile ("cli\nhlt");
         }
     }
 
     serial_write_string(
-        "IOAPIC STAGE 3 READBACK: EXACT MATCH\n"
+        "IOAPIC STAGE 3 ROUTING: VERIFIED\n"
     );
 
     serial_write_string(
-        "IOAPIC STAGE 3 MASK READBACK: VERIFIED\n"
+        "IOAPIC STAGE 3 DELIVERY: MASKED\n"
     );
-
-    serial_write_string(
-        "IOAPIC STAGE 3 INTERRUPT DELIVERY: DISABLED\n"
-    );
-
-    serial_write_string(
-        "IOAPIC REDIRECTION: VERIFIED\n"
-    );
-
 
     /* --------------------------------------------------------
        HARDWARE IRQ / TIMER BRING-UP
@@ -724,36 +530,16 @@ void interrupt_tests_run(void)
     );
 
     /*
-     * Initialize and remap the legacy 8259 PIC.
+     * Production interrupt routing is established by
+     * irq_routing_init() before the test suite runs.
      *
-     * Keep every IRQ masked while the interrupt subsystem
-     * and PIT are being configured.
+     * This test must not initialize or mutate the live
+     * controller state. It verifies the resulting ownership.
      */
-    pic_init();
-
-    for (uint8_t irq = 0; irq < IRQ_COUNT; irq++)
-    {
-        pic_set_mask(irq);
-    }
-
-    /*
-     * Register BATOS IRQ handlers.
-     *
-     * IRQ0 is handled by the timer handler in irq.c.
-     */
-    irq_init();
-
-    /*
-     * Stage 4: verify that the live IRQ0 source is explicitly
-     * assigned to the legacy PIC controller.
-     *
-     * APIC delivery remains disabled until the controlled
-     * migration stage.
-     */
-    if (irq_get_controller(0) == IRQ_CONTROLLER_PIC)
+    if (irq_get_controller(0) == IRQ_CONTROLLER_LAPIC)
     {
         serial_write_string(
-            "IRQ CONTROLLER IRQ0: PIC\n"
+            "IRQ CONTROLLER IRQ0: LAPIC\n"
         );
 
         serial_write_string(
@@ -765,50 +551,6 @@ void interrupt_tests_run(void)
         serial_write_string(
             "IRQ CONTROLLER IRQ0: FAILED\n"
         );
-    }
-
-
-}
-
-void interrupt_test_irq0_lapic_delivery(void)
-{
-    /* --------------------------------------------------------
-       STAGE 5: CONTROLLED IRQ0 MIGRATION TO LAPIC
-       --------------------------------------------------------
-
-       PIT IRQ0 is migrated from:
-
-           PIT -> PIC -> vector 32 -> irq_dispatch()
-
-       to:
-
-           PIT -> IRQ0 -> MADT ISO -> GSI
-               -> IOAPIC -> LAPIC -> vector 32
-               -> irq_stub_0 -> irq_dispatch()
-               -> LAPIC EOI
-
-       PIC IRQ0 remains masked throughout the transition.
-       The IOAPIC entry is programmed and verified while
-       masked, controller ownership is switched to LAPIC,
-       and only then is IOAPIC delivery enabled.
-       -------------------------------------------------------- */
-
-    serial_write_string(
-        "IOAPIC STAGE 5: IRQ0 LAPIC MIGRATION START\n"
-    );
-
-    /*
-     * Resolve IRQ0 routing locally for Stage-5. The earlier
-     * bring-up test owns its own route state and must not leak
-     * implementation state across test functions.
-     */
-    struct gsi_irq_route gsi_irq0_route;
-
-    if (gsi_resolve_irq(0, &gsi_irq0_route) != 0)
-    {
-        serial_write_string(
-            "IOAPIC STAGE 5 GSI ROUTE: FAILED\n"
-        );
 
         serial_write_string(
             "CPU HALTED\n"
@@ -817,420 +559,9 @@ void interrupt_test_irq0_lapic_delivery(void)
         for (;;)
         {
             __asm__ volatile (
-                "cli\nhlt"
+                "cli\n"
+                "hlt"
             );
         }
     }
-
-    uint32_t lapic_id =
-        lapic_read(LAPIC_REG_ID);
-
-    /*
-     * Block CPU interrupt delivery while controller ownership
-     * and IOAPIC routing are changed.
-     */
-    __asm__ volatile (
-        "cli"
-        :
-        :
-        : "memory"
-    );
-
-    /*
-     * Keep the legacy PIC IRQ0 masked.
-     */
-    pic_set_mask(0);
-
-    serial_write_string(
-        "IOAPIC STAGE 5 PIC IRQ0: MASKED\n"
-    );
-
-    uint32_t stage5_ioapic_index =
-        gsi_irq0_route.ioapic_index;
-
-    uint8_t stage5_redirection_index =
-        (uint8_t)(
-            gsi_irq0_route.ioapic_redirection_index
-        );
-
-    uint8_t stage5_lapic_id =
-        (uint8_t)(lapic_id >> 24);
-
-    /*
-     * Program vector 32 so the existing irq_stub_0 path
-     * remains unchanged.
-     */
-    uint64_t stage5_expected =
-        IOAPIC_IRQ0_VECTOR |
-        IOAPIC_REDIR_DELIVERY_FIXED |
-        IOAPIC_REDIR_MASKED |
-        ((uint64_t)stage5_lapic_id << 56);
-
-    /*
-     * Preserve the electrical characteristics resolved
-     * from the ACPI MADT interrupt source override.
-     */
-    if (gsi_irq0_route.polarity == GSI_POLARITY_LOW)
-    {
-        stage5_expected |= IOAPIC_REDIR_POLARITY_LOW;
-    }
-    else if (gsi_irq0_route.polarity != GSI_POLARITY_HIGH)
-    {
-        serial_write_string(
-            "IOAPIC STAGE 5 POLARITY: FAILED\n"
-        );
-        serial_write_string("CPU HALTED\n");
-
-        for (;;)
-        {
-            __asm__ volatile ("cli\nhlt");
-        }
-    }
-
-    if (gsi_irq0_route.trigger_mode == GSI_TRIGGER_LEVEL)
-    {
-        stage5_expected |= IOAPIC_REDIR_TRIGGER_LEVEL;
-    }
-    else if (gsi_irq0_route.trigger_mode != GSI_TRIGGER_EDGE)
-    {
-        serial_write_string(
-            "IOAPIC STAGE 5 TRIGGER: FAILED\n"
-        );
-        serial_write_string("CPU HALTED\n");
-
-        for (;;)
-        {
-            __asm__ volatile ("cli\nhlt");
-        }
-    }
-
-    serial_write_string(
-        "IOAPIC STAGE 5 ROUTE: IRQ0 -> GSI="
-    );
-    serial_write_hex(
-        (uint64_t)gsi_irq0_route.gsi
-    );
-    serial_write_string(
-        " -> IOAPIC="
-    );
-    serial_write_hex(
-        (uint64_t)stage5_ioapic_index
-    );
-    serial_write_string(
-        " -> REDIR="
-    );
-    serial_write_hex(
-        (uint64_t)stage5_redirection_index
-    );
-    serial_write_string("\n");
-
-    serial_write_string(
-        "IOAPIC STAGE 5 VECTOR: "
-    );
-    serial_write_hex(
-        (uint64_t)IOAPIC_IRQ0_VECTOR
-    );
-    serial_write_string("\n");
-
-    serial_write_string(
-        "IOAPIC STAGE 5 LAPIC DESTINATION: "
-    );
-    serial_write_hex(
-        (uint64_t)stage5_lapic_id
-    );
-    serial_write_string("\n");
-
-    serial_write_string(
-        "IOAPIC STAGE 5 EXPECTED MASKED: "
-    );
-    serial_write_hex(stage5_expected);
-    serial_write_string("\n");
-
-    /*
-     * Program the IOAPIC entry while it is still masked.
-     */
-    int stage5_write_result =
-        ioapic_write_redirection_at(
-            stage5_ioapic_index,
-            stage5_redirection_index,
-            stage5_expected
-        );
-
-    if (stage5_write_result != 0)
-    {
-        serial_write_string(
-            "IOAPIC STAGE 5 WRITE: FAILED\n"
-        );
-        serial_write_string("CPU HALTED\n");
-
-        for (;;)
-        {
-            __asm__ volatile ("cli\nhlt");
-        }
-    }
-
-    uint64_t stage5_actual = 0;
-
-    int stage5_read_result =
-        ioapic_read_redirection_at(
-            stage5_ioapic_index,
-            stage5_redirection_index,
-            &stage5_actual
-        );
-
-    if (stage5_read_result != 0)
-    {
-        serial_write_string(
-            "IOAPIC STAGE 5 READBACK: FAILED\n"
-        );
-        serial_write_string("CPU HALTED\n");
-
-        for (;;)
-        {
-            __asm__ volatile ("cli\nhlt");
-        }
-    }
-
-    serial_write_string(
-        "IOAPIC STAGE 5 ACTUAL MASKED: "
-    );
-    serial_write_hex(stage5_actual);
-    serial_write_string("\n");
-
-    if (stage5_actual != stage5_expected ||
-        (stage5_actual & IOAPIC_REDIR_MASKED) == 0)
-    {
-        serial_write_string(
-            "IOAPIC STAGE 5 MASKED READBACK: FAILED\n"
-        );
-        serial_write_string("CPU HALTED\n");
-
-        for (;;)
-        {
-            __asm__ volatile ("cli\nhlt");
-        }
-    }
-
-    serial_write_string(
-        "IOAPIC STAGE 5 MASKED READBACK: VERIFIED\n"
-    );
-
-    /*
-     * Switch software IRQ ownership BEFORE unmasking the
-     * IOAPIC entry.
-     */
-    if (irq_set_controller(
-            0,
-            IRQ_CONTROLLER_LAPIC
-        ) != 0)
-    {
-        serial_write_string(
-            "IOAPIC STAGE 5 CONTROLLER SWITCH: FAILED\n"
-        );
-        serial_write_string("CPU HALTED\n");
-
-        for (;;)
-        {
-            __asm__ volatile ("cli\nhlt");
-        }
-    }
-
-    if (irq_get_controller(0) != IRQ_CONTROLLER_LAPIC)
-    {
-        serial_write_string(
-            "IOAPIC STAGE 5 CONTROLLER VERIFY: FAILED\n"
-        );
-        serial_write_string("CPU HALTED\n");
-
-        for (;;)
-        {
-            __asm__ volatile ("cli\nhlt");
-        }
-    }
-
-    serial_write_string(
-        "IOAPIC STAGE 5 CONTROLLER: LAPIC\n"
-    );
-
-    /*
-     * Remove ONLY the mask bit.
-     */
-    uint64_t stage5_unmasked =
-        stage5_expected &
-        ~IOAPIC_REDIR_MASKED;
-
-    if (ioapic_write_redirection_at(
-            stage5_ioapic_index,
-            stage5_redirection_index,
-            stage5_unmasked
-        ) != 0)
-    {
-        serial_write_string(
-            "IOAPIC STAGE 5 UNMASK: WRITE FAILED\n"
-        );
-        serial_write_string("CPU HALTED\n");
-
-        for (;;)
-        {
-            __asm__ volatile ("cli\nhlt");
-        }
-    }
-
-    uint64_t stage5_unmasked_actual = 0;
-
-    if (ioapic_read_redirection_at(
-            stage5_ioapic_index,
-            stage5_redirection_index,
-            &stage5_unmasked_actual
-        ) != 0)
-    {
-        serial_write_string(
-            "IOAPIC STAGE 5 UNMASK: READ FAILED\n"
-        );
-        serial_write_string("CPU HALTED\n");
-
-        for (;;)
-        {
-            __asm__ volatile ("cli\nhlt");
-        }
-    }
-
-    if (stage5_unmasked_actual != stage5_unmasked ||
-        (stage5_unmasked_actual & IOAPIC_REDIR_MASKED) != 0)
-    {
-        serial_write_string(
-            "IOAPIC STAGE 5 UNMASK READBACK: FAILED\n"
-        );
-        serial_write_string("CPU HALTED\n");
-
-        for (;;)
-        {
-            __asm__ volatile ("cli\nhlt");
-        }
-    }
-
-    serial_write_string(
-        "IOAPIC STAGE 5 UNMASK READBACK: VERIFIED\n"
-    );
-
-    serial_write_string(
-        "IOAPIC STAGE 5 INTERRUPT DELIVERY: ENABLED\n"
-    );
-
-    serial_write_string(
-        "IOAPIC STAGE 5: LAPIC IRQ0 PATH ARMED\n"
-    );
-
-    serial_write_string(
-        "PIT 100HZ READY\n"
-    );
-
-    uint64_t start_ticks = irq_get_ticks();
-    uint64_t start_time_ticks = time_get_ticks();
-    uint64_t start_uptime_ms = time_get_uptime_ms();
-
-    serial_write_string(
-        "IRQ0 TEST WAITING\n"
-    );
-
-    serial_write_string(
-        "TIMEKEEPING START TICKS: "
-    );
-    serial_write_hex(start_time_ticks);
-    serial_write_string("\n");
-
-    serial_write_string(
-        "TIMEKEEPING START UPTIME MS: "
-    );
-    serial_write_hex(start_uptime_ms);
-    serial_write_string("\n");
-
-    /*
-     * Enable maskable hardware interrupts only after
-     * PIC, IRQ handlers and PIT are completely ready.
-     */
-    __asm__ volatile (
-        "sti"
-        :
-        :
-        : "memory"
-    );
-
-    /*
-     * Wait for 100 real IRQ0 timer ticks.
-     *
-     * At 100 Hz this should take approximately one second.
-     */
-    while (irq_get_ticks() < start_ticks + 100)
-    {
-        __asm__ volatile (
-            "hlt"
-            :
-            :
-            : "memory"
-        );
-    }
-
-    /*
-     * Stop maskable interrupts before reporting the result.
-     */
-    __asm__ volatile (
-        "cli"
-        :
-        :
-        : "memory"
-    );
-
-    uint64_t end_ticks = irq_get_ticks();
-    uint64_t end_time_ticks = time_get_ticks();
-    uint64_t end_uptime_ms = time_get_uptime_ms();
-
-    serial_write_string(
-        "IRQ0 TEST START TICKS: "
-    );
-    serial_write_hex(start_ticks);
-    serial_write_string("\n");
-
-    serial_write_string(
-        "IRQ0 TEST END TICKS: "
-    );
-    serial_write_hex(end_ticks);
-    serial_write_string("\n");
-
-    serial_write_string(
-        "TIMEKEEPING END TICKS: "
-    );
-    serial_write_hex(end_time_ticks);
-    serial_write_string("\n");
-
-    serial_write_string(
-        "TIMEKEEPING END UPTIME MS: "
-    );
-    serial_write_hex(end_uptime_ms);
-    serial_write_string("\n");
-
-    if (end_ticks >= start_ticks + 100 &&
-        end_time_ticks >= start_time_ticks + 100 &&
-        end_uptime_ms >= start_uptime_ms + 1000)
-    {
-        serial_write_string(
-            "IRQ0 TIMER: VERIFIED\n"
-        );
-
-        serial_write_string(
-            "HARDWARE INTERRUPTS: VERIFIED\n"
-        );
-    }
-    else
-    {
-        serial_write_string(
-            "IRQ0 TIMER: FAILED\n"
-        );
-
-        serial_write_string(
-            "HARDWARE INTERRUPTS: FAILED\n"
-        );
-    }
-
-
 }

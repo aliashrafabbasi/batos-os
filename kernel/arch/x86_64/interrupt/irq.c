@@ -7,14 +7,14 @@ static irq_handler_t irq_handlers[IRQ_COUNT];
 
 static enum irq_controller irq_controllers[IRQ_COUNT];
 
-static volatile uint64_t irq_ticks = 0;
+static volatile uint64_t irq0_delivery_count = 0;
 
 static void irq0_timer_handler(struct irq_frame *frame)
 {
     (void)frame;
 
-    irq_ticks++;
-    clock_event_notify();
+    irq0_delivery_count++;
+    clock_event_notify(CLOCK_EVENT_SOURCE_PIT);
 }
 
 void irq_init(void)
@@ -28,12 +28,12 @@ void irq_init(void)
     /*
      * IRQ0 is the first real hardware interrupt used by BATOS.
      *
-     * The IRQ0 handler is registered here.
+     * The IRQ0 handler is registered here. Hardware routing and
+     * controller ownership are established separately by the
+     * interrupt-routing layer.
      *
-     * The live timer source is currently PIT-driven, with
-     * IRQ0 delivered through the IOAPIC to the LAPIC.
-     * The clock-event abstraction sits between IRQ delivery
-     * and timekeeping.
+     * The clock-event abstraction sits between hardware timer
+     * delivery and system timekeeping.
      */
     irq_register_handler(0, irq0_timer_handler);
 }
@@ -130,7 +130,7 @@ void irq_dispatch(struct irq_frame *frame)
     }
 }
 
-uint64_t irq_get_ticks(void)
+uint64_t irq_get_irq0_delivery_count(void)
 {
-    return irq_ticks;
+    return irq0_delivery_count;
 }

@@ -36,10 +36,15 @@ int clock_event_init(
     return 0;
 }
 
-void clock_event_notify(void)
+void clock_event_notify(enum clock_event_source source)
 {
     if (clock_event_source == CLOCK_EVENT_SOURCE_NONE ||
         clock_event_frequency == 0)
+    {
+        return;
+    }
+
+    if (source != clock_event_source)
     {
         return;
     }

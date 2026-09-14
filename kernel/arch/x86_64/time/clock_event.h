@@ -15,7 +15,7 @@ int clock_event_init(
     uint32_t frequency
 );
 
-void clock_event_notify(void);
+void clock_event_notify(enum clock_event_source source);
 
 enum clock_event_source clock_event_get_source(void);
 

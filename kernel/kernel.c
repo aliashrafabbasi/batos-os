@@ -3,6 +3,7 @@
 
 #include "kernel/boot/boot.h"
 #include "kernel/platform/platform.h"
+#include "kernel/arch/x86_64/interrupt/irq_routing.h"
 #include "kernel/arch/x86_64/cpu/cpu.h"
 #include "kernel/arch/x86_64/cpu/tss.h"
 #include "kernel/mm/pmm/pmm.h"
@@ -219,6 +220,38 @@ void kernel_main(void)
             __asm__ volatile ("cli\nhlt");
         }
     }
+
+    int irq_routing_result = irq_routing_init();
+
+    if (irq_routing_result != 0)
+    {
+        serial_write_string(
+            "IRQ ROUTING INITIALIZATION FAILED\n"
+        );
+
+        serial_write_string(
+            "IRQ ROUTING ERROR CODE: "
+        );
+
+        serial_write_hex(
+            (uint64_t)(uint32_t)(-irq_routing_result)
+        );
+
+        serial_write_string("\n");
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile ("cli\nhlt");
+        }
+    }
+
+    serial_write_string(
+        "IRQ ROUTING: READY\n"
+    );
 
     acpi_tests_run();
 

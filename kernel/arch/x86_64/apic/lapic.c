@@ -200,7 +200,7 @@ void lapic_timer_interrupt(
 
     lapic_timer_interrupt_count++;
 
-    clock_event_notify();
+    clock_event_notify(CLOCK_EVENT_SOURCE_LAPIC);
 }
 
 /*
