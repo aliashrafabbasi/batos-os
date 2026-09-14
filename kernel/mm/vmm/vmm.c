@@ -834,7 +834,10 @@ int vmm_activate_address_space(
     active_address_space_pml4 =
         pml4_physical;
 
-    __asm__ volatile ("sti");
+    /*
+     * Interrupt-state ownership remains with the caller.
+     * This function never enables or disables interrupts.
+     */
 
     return 0;
 }
