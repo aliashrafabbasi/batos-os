@@ -107,6 +107,17 @@ void runqueue_tests_run(void)
         );
     }
 
+    if (runqueue_peek() != &task_a ||
+        runqueue_count() != 3 ||
+        !runqueue_contains(&task_a) ||
+        !runqueue_contains(&task_b) ||
+        !runqueue_contains(&task_c))
+    {
+        runqueue_test_fail(
+            "RUNQUEUE PEEK: FAILED\n"
+        );
+    }
+
     if (runqueue_dequeue() != &task_a ||
         runqueue_dequeue() != &task_b ||
         runqueue_dequeue() != &task_c ||

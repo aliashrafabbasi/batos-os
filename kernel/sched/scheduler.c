@@ -8,7 +8,12 @@
 static struct task *scheduler_current = NULL;
 static uint64_t scheduler_dispatch_count = 0;
 
-static struct task *scheduler_select_next(void)
+static struct task *scheduler_peek_next(void)
+{
+    return runqueue_peek();
+}
+
+static struct task *scheduler_take_next(void)
 {
     return runqueue_dequeue();
 }
@@ -40,7 +45,7 @@ int scheduler_start(void)
         return -1;
     }
 
-    next = scheduler_select_next();
+    next = scheduler_peek_next();
 
     if (next == NULL)
     {
@@ -50,6 +55,13 @@ int scheduler_start(void)
     if (next->state != TASK_STATE_READY)
     {
         return -3;
+    }
+
+    next = scheduler_take_next();
+
+    if (next == NULL)
+    {
+        return -4;
     }
 
     next->state = TASK_STATE_RUNNING;
@@ -96,7 +108,7 @@ int scheduler_yield(void)
         return -3;
     }
 
-    next = scheduler_select_next();
+    next = scheduler_peek_next();
 
     if (next == NULL)
     {
@@ -110,6 +122,15 @@ int scheduler_yield(void)
         runqueue_remove(current);
         current->state = TASK_STATE_RUNNING;
         return -5;
+    }
+
+    next = scheduler_take_next();
+
+    if (next == NULL)
+    {
+        runqueue_remove(current);
+        current->state = TASK_STATE_RUNNING;
+        return -6;
     }
 
     next->state = TASK_STATE_RUNNING;
@@ -139,7 +160,7 @@ int scheduler_exit_current(struct task *task)
         return -2;
     }
 
-    next = scheduler_select_next();
+    next = scheduler_peek_next();
 
     if (next == NULL)
     {
@@ -161,6 +182,13 @@ int scheduler_exit_current(struct task *task)
     if (next->state != TASK_STATE_READY)
     {
         return -3;
+    }
+
+    next = scheduler_take_next();
+
+    if (next == NULL)
+    {
+        return -4;
     }
 
     next->state = TASK_STATE_RUNNING;

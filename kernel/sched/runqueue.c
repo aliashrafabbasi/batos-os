@@ -81,6 +81,17 @@ int runqueue_enqueue(
     return 0;
 }
 
+struct task *runqueue_peek(void)
+{
+    if (!runqueue_initialized ||
+        runqueue_active_count == 0)
+    {
+        return NULL;
+    }
+
+    return runqueue_tasks[runqueue_head];
+}
+
 struct task *runqueue_dequeue(void)
 {
     if (!runqueue_initialized ||

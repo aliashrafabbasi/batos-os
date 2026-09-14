@@ -11,6 +11,8 @@ int runqueue_enqueue(
     struct task *task
 );
 
+struct task *runqueue_peek(void);
+
 struct task *runqueue_dequeue(void);
 
 int runqueue_remove(

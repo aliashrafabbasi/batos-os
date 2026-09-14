@@ -164,14 +164,20 @@ void scheduler_tests_run(void)
      * Invalid scheduler operations must fail without creating
      * scheduler ownership or changing the initial state.
      */
-    if (scheduler_start() == 0)
+    if (scheduler_start() == 0 ||
+        scheduler_get_current() != NULL ||
+        scheduler_get_dispatch_count() != 0 ||
+        runqueue_count() != 0)
     {
         scheduler_test_fail(
-            "SCHEDULER EMPTY START: FAILED\n"
+            "SCHEDULER EMPTY START ATOMICITY: FAILED\n"
         );
     }
 
-    if (scheduler_yield() == 0)
+    if (scheduler_yield() == 0 ||
+        scheduler_get_current() != NULL ||
+        scheduler_get_dispatch_count() != 0 ||
+        runqueue_count() != 0)
     {
         scheduler_test_fail(
             "SCHEDULER EMPTY YIELD: FAILED\n"
@@ -320,7 +326,9 @@ void scheduler_tests_run(void)
         scheduler_task_a.state != TASK_STATE_RUNNING ||
         runqueue_contains(&scheduler_task_a) ||
         scheduler_task_b.state != TASK_STATE_READY ||
-        !runqueue_contains(&scheduler_task_b))
+        !runqueue_contains(&scheduler_task_b) ||
+        runqueue_count() != 1 ||
+        scheduler_get_dispatch_count() != 2)
     {
         scheduler_test_fail(
             "SCHEDULER EXIT REJECTION STATE: FAILED\n"
@@ -357,6 +365,10 @@ void scheduler_tests_run(void)
 
     serial_write_string(
         "SCHEDULER INIT: VERIFIED\n"
+    );
+
+    serial_write_string(
+        "SCHEDULER TRANSITION ATOMICITY: VERIFIED\n"
     );
 
     serial_write_string(
