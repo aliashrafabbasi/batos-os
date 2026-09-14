@@ -17,6 +17,7 @@
 #include "kernel/tests/acpi_tests.h"
 #include "kernel/tests/context_tests.h"
 #include "kernel/tests/task_tests.h"
+#include "kernel/tests/preempt_tests.h"
 #include "kernel/tests/task_registry_tests.h"
 #include "kernel/tests/runqueue_tests.h"
 #include "kernel/tests/scheduler_tests.h"
@@ -280,6 +281,7 @@ void kernel_main(void)
     context_tests_run();
 
     task_tests_run();
+    preempt_tests_run();
     task_registry_tests_run();
     runqueue_tests_run();
     scheduler_tests_run();

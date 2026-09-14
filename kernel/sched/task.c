@@ -1,5 +1,7 @@
 #include "task.h"
 
+#include "../arch/x86_64/sched/preempt.h"
+
 #include "../mm/pmm/pmm.h"
 #include "../mm/vmm/vmm.h"
 
@@ -263,6 +265,9 @@ int task_create(
     task->entry = entry;
     task->argument = argument;
 
+    task->preempt_state.frame_address = 0;
+    task->preempt_state.valid = 0;
+
     task->context.rbx = 0;
     task->context.rbp = 0;
     task->context.r12 = 0;
@@ -303,6 +308,33 @@ int task_create(
     task->context.rip =
         (uint64_t)(uintptr_t)
             x86_64_task_bootstrap_trampoline;
+
+    /*
+     * Prepare the architecture-owned interrupt-return state
+     * without changing the existing cooperative context ABI.
+     */
+    if (x86_64_preempt_prepare_first_run(
+            task,
+            &task->preempt_state
+        ) != 0)
+    {
+        task_unmap_stack(task);
+
+        task->kernel_stack_base = 0;
+        task->kernel_stack_top = 0;
+
+        for (uint64_t page = 0;
+             page < TASK_KERNEL_STACK_PAGE_COUNT;
+             page++)
+        {
+            task->kernel_stack_pages[page] = 0;
+        }
+
+        task->preempt_state.frame_address = 0;
+        task->preempt_state.valid = 0;
+
+        return -1;
+    }
 
     task->state =
         TASK_STATE_READY;
@@ -364,6 +396,15 @@ int task_destroy(struct task *task)
 
     task->entry = NULL;
     task->argument = NULL;
+
+    /*
+     * The saved interrupt-return frame lived on the task's
+     * kernel stack. Once that stack has been destroyed, the
+     * architecture-owned preemptive state must no longer be
+     * considered resumable.
+     */
+    task->preempt_state.frame_address = 0;
+    task->preempt_state.valid = 0;
 
     return 0;
 }

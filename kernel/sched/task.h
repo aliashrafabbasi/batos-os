@@ -4,6 +4,7 @@
 #include <stdint.h>
 
 #include "../arch/x86_64/sched/context.h"
+#include "../arch/x86_64/sched/preempt.h"
 
 #define TASK_KERNEL_STACK_PAGE_COUNT 4ULL
 #define TASK_KERNEL_STACK_SIZE \
@@ -55,6 +56,14 @@ struct task
 
     task_entry_t entry;
     void *argument;
+
+    /*
+     * Architecture-owned resumable interrupt-return state.
+     *
+     * Generic task/scheduler code owns the handle but does
+     * not interpret the saved interrupt frame.
+     */
+    struct x86_64_preempt_state preempt_state;
 
     struct x86_64_context context;
 };

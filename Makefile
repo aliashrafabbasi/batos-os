@@ -31,6 +31,7 @@ C_SOURCES = \
     kernel/tests/acpi_tests.c \
     kernel/tests/context_tests.c \
     kernel/tests/task_tests.c \
+    kernel/tests/preempt_tests.c \
     kernel/tests/task_registry_tests.c \
     kernel/tests/runqueue_tests.c \
     kernel/tests/scheduler_tests.c \
@@ -53,6 +54,7 @@ C_SOURCES = \
     kernel/sched/task_registry.c \
     kernel/sched/runqueue.c \
     kernel/sched/scheduler.c \
+    kernel/arch/x86_64/sched/preempt.c \
     kernel/arch/x86_64/apic/lapic.c \
     kernel/arch/x86_64/apic/ioapic.c \
     kernel/arch/x86_64/apic/gsi.c \
@@ -70,7 +72,8 @@ C_OBJECTS = $(C_SOURCES:.c=.o)
 ASM_OBJECTS = \
     $(BUILD_DIR)/interrupts.o \
     $(BUILD_DIR)/switch.o \
-    $(BUILD_DIR)/task_bootstrap.o
+    $(BUILD_DIR)/task_bootstrap.o \
+    $(BUILD_DIR)/preempt.o
 
 OBJECTS = $(C_OBJECTS) $(ASM_OBJECTS)
 
@@ -88,6 +91,9 @@ $(BUILD_DIR)/switch.o: kernel/arch/x86_64/sched/switch.asm
 	$(NASM) -f elf64 $< -o $@
 
 $(BUILD_DIR)/task_bootstrap.o: kernel/arch/x86_64/sched/task_bootstrap.asm
+	$(NASM) -f elf64 $< -o $@
+
+$(BUILD_DIR)/preempt.o: kernel/arch/x86_64/sched/preempt.asm
 	$(NASM) -f elf64 $< -o $@
 
 $(BUILD_DIR)/batos.elf: $(OBJECTS)
