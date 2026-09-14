@@ -2,6 +2,8 @@
 
 #include "../sched/task.h"
 #include "../sched/scheduler.h"
+#include "../sched/runqueue.h"
+#include "../sched/task_registry.h"
 #include "../arch/x86_64/sched/context.h"
 #include "../mm/pmm/pmm.h"
 #include "../mm/vmm/vmm.h"
@@ -177,18 +179,128 @@ void task_tests_run(void)
     );
 
     /*
+     * Lifecycle ownership contract:
+     *
+     * A READY task may be destroyed while it has no external
+     * scheduler membership. Once admitted to the runqueue,
+     * runnable ownership must be released before task-owned
+     * resources are destroyed.
+     */
+    struct task lifecycle_task = {0};
+
+    if (scheduler_init() != 0)
+    {
+        task_test_fail(
+            "TASK LIFECYCLE SCHEDULER INIT: FAILED\n"
+        );
+    }
+
+    if (task_create(
+            &lifecycle_task,
+            4,
+            pml4,
+            task_test_entry,
+            NULL
+        ) != 0)
+    {
+        task_test_fail(
+            "TASK LIFECYCLE CREATE: FAILED\n"
+        );
+    }
+
+    if (scheduler_add(&lifecycle_task) != 0 ||
+        !runqueue_contains(&lifecycle_task))
+    {
+        task_test_fail(
+            "TASK LIFECYCLE RUNQUEUE ADMISSION: FAILED\n"
+        );
+    }
+
+    if (runqueue_remove(&lifecycle_task) != 0 ||
+        runqueue_contains(&lifecycle_task))
+    {
+        task_test_fail(
+            "TASK LIFECYCLE RUNQUEUE RELEASE: FAILED\n"
+        );
+    }
+
+    if (task_destroy(&lifecycle_task) != 0)
+    {
+        task_test_fail(
+            "TASK LIFECYCLE DESTROY: FAILED\n"
+        );
+    }
+
+    serial_write_string(
+        "TASK LIFECYCLE RUNQUEUE OWNERSHIP: VERIFIED\n"
+    );
+
+    /*
+     * Registry membership is independently owned. It must be
+     * released before final task resource destruction.
+     */
+    struct task registry_lifecycle_task = {0};
+
+    if (task_create(
+            &registry_lifecycle_task,
+            5,
+            pml4,
+            task_test_entry,
+            NULL
+        ) != 0)
+    {
+        task_test_fail(
+            "TASK LIFECYCLE REGISTRY CREATE: FAILED\n"
+        );
+    }
+
+    if (task_registry_init() != 0 ||
+        task_registry_register(&registry_lifecycle_task) != 0)
+    {
+        task_test_fail(
+            "TASK LIFECYCLE REGISTRY ADMISSION: FAILED\n"
+        );
+    }
+
+    if (task_registry_find(
+            registry_lifecycle_task.id
+        ) != &registry_lifecycle_task)
+    {
+        task_test_fail(
+            "TASK LIFECYCLE REGISTRY OWNERSHIP: FAILED\n"
+        );
+    }
+
+    if (task_registry_unregister(
+            &registry_lifecycle_task
+        ) != 0 ||
+        task_registry_find(
+            registry_lifecycle_task.id
+        ) != NULL)
+    {
+        task_test_fail(
+            "TASK LIFECYCLE REGISTRY RELEASE: FAILED\n"
+        );
+    }
+
+    if (task_destroy(&registry_lifecycle_task) != 0)
+    {
+        task_test_fail(
+            "TASK LIFECYCLE REGISTRY DESTROY: FAILED\n"
+        );
+    }
+
+    serial_write_string(
+        "TASK LIFECYCLE REGISTRY OWNERSHIP: VERIFIED\n"
+    );
+
+    /*
      * Real task execution/termination verification.
      *
      * Task A executes its entry, verifies its argument, exits,
      * and the scheduler transfers control to Task B without
      * re-queueing the terminated task.
      */
-    if (scheduler_init() != 0)
-    {
-        task_test_fail(
-            "TASK EXECUTION SCHEDULER INIT: FAILED\n"
-        );
-    }
 
     if (task_create(
             &task_execution_a,
