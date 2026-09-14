@@ -2,6 +2,7 @@
 
 #include "../sched/scheduler.h"
 #include "../sched/task.h"
+#include "../sched/runqueue.h"
 #include "../console/console.h"
 #include "../arch/x86_64/sched/context.h"
 
@@ -148,10 +149,81 @@ void scheduler_tests_run(void)
         );
     }
 
-    if (scheduler_get_current() != NULL)
+    if (scheduler_get_current() != NULL ||
+        scheduler_get_dispatch_count() != 0 ||
+        runqueue_count() != 0)
     {
         scheduler_test_fail(
-            "SCHEDULER INITIAL CURRENT: FAILED\n"
+            "SCHEDULER INITIAL STATE: FAILED\n"
+        );
+    }
+
+    /*
+     * Scheduler rejection-path contract.
+     *
+     * Invalid scheduler operations must fail without creating
+     * scheduler ownership or changing the initial state.
+     */
+    if (scheduler_start() == 0)
+    {
+        scheduler_test_fail(
+            "SCHEDULER EMPTY START: FAILED\n"
+        );
+    }
+
+    if (scheduler_yield() == 0)
+    {
+        scheduler_test_fail(
+            "SCHEDULER EMPTY YIELD: FAILED\n"
+        );
+    }
+
+    if (scheduler_add(NULL) == 0)
+    {
+        scheduler_test_fail(
+            "SCHEDULER NULL ADMISSION: FAILED\n"
+        );
+    }
+
+    struct task invalid_task = {0};
+
+    invalid_task.state = TASK_STATE_NEW;
+    if (scheduler_add(&invalid_task) == 0)
+    {
+        scheduler_test_fail(
+            "SCHEDULER NEW ADMISSION: FAILED\n"
+        );
+    }
+
+    invalid_task.state = TASK_STATE_BLOCKED;
+    if (scheduler_add(&invalid_task) == 0)
+    {
+        scheduler_test_fail(
+            "SCHEDULER BLOCKED ADMISSION: FAILED\n"
+        );
+    }
+
+    invalid_task.state = TASK_STATE_SLEEPING;
+    if (scheduler_add(&invalid_task) == 0)
+    {
+        scheduler_test_fail(
+            "SCHEDULER SLEEPING ADMISSION: FAILED\n"
+        );
+    }
+
+    invalid_task.state = TASK_STATE_RUNNING;
+    if (scheduler_add(&invalid_task) == 0)
+    {
+        scheduler_test_fail(
+            "SCHEDULER RUNNING ADMISSION: FAILED\n"
+        );
+    }
+
+    invalid_task.state = TASK_STATE_TERMINATED;
+    if (scheduler_add(&invalid_task) == 0)
+    {
+        scheduler_test_fail(
+            "SCHEDULER TERMINATED ADMISSION: FAILED\n"
         );
     }
 
@@ -163,6 +235,21 @@ void scheduler_tests_run(void)
         );
     }
 
+    if (scheduler_add(&scheduler_task_a) == 0)
+    {
+        scheduler_test_fail(
+            "SCHEDULER DUPLICATE ADMISSION: FAILED\n"
+        );
+    }
+
+    if (runqueue_count() != 2 ||
+        !runqueue_contains(&scheduler_task_a) ||
+        !runqueue_contains(&scheduler_task_b))
+    {
+        scheduler_test_fail(
+            "SCHEDULER READY OWNERSHIP: FAILED\n"
+        );
+    }
     if (scheduler_start() != 0)
     {
         scheduler_test_fail(
@@ -170,8 +257,19 @@ void scheduler_tests_run(void)
         );
     }
 
+    if (scheduler_start() == 0)
+    {
+        scheduler_test_fail(
+            "SCHEDULER SECOND START: FAILED\n"
+        );
+    }
+
     if (scheduler_get_current() != &scheduler_task_a ||
-        scheduler_task_a.state != TASK_STATE_RUNNING)
+        scheduler_task_a.state != TASK_STATE_RUNNING ||
+        runqueue_contains(&scheduler_task_a) ||
+        scheduler_task_b.state != TASK_STATE_READY ||
+        !runqueue_contains(&scheduler_task_b) ||
+        runqueue_count() != 1)
     {
         scheduler_test_fail(
             "SCHEDULER CURRENT TASK: FAILED\n"
@@ -190,6 +288,45 @@ void scheduler_tests_run(void)
         &scheduler_task_a.context
     );
 
+    /*
+     * A is RUNNING and B is READY at this point.
+     *
+     * Only the current task may request termination dispatch, and
+     * the current task must already be TERMINATED before the
+     * scheduler accepts that handoff.
+     */
+    if (scheduler_exit_current(NULL) == 0)
+    {
+        scheduler_test_fail(
+            "SCHEDULER NULL EXIT: FAILED\n"
+        );
+    }
+
+    if (scheduler_exit_current(&scheduler_task_b) == 0)
+    {
+        scheduler_test_fail(
+            "SCHEDULER NONCURRENT EXIT: FAILED\n"
+        );
+    }
+
+    if (scheduler_exit_current(&scheduler_task_a) == 0)
+    {
+        scheduler_test_fail(
+            "SCHEDULER RUNNING EXIT: FAILED\n"
+        );
+    }
+
+    if (scheduler_get_current() != &scheduler_task_a ||
+        scheduler_task_a.state != TASK_STATE_RUNNING ||
+        runqueue_contains(&scheduler_task_a) ||
+        scheduler_task_b.state != TASK_STATE_READY ||
+        !runqueue_contains(&scheduler_task_b))
+    {
+        scheduler_test_fail(
+            "SCHEDULER EXIT REJECTION STATE: FAILED\n"
+        );
+    }
+
     if (scheduler_a_reached != 1 ||
         scheduler_b_reached != 1 ||
         scheduler_a_resumed != 1)
@@ -200,10 +337,14 @@ void scheduler_tests_run(void)
     }
 
     if (scheduler_get_current() != &scheduler_task_a ||
-        scheduler_task_a.state != TASK_STATE_RUNNING)
+        scheduler_task_a.state != TASK_STATE_RUNNING ||
+        runqueue_contains(&scheduler_task_a) ||
+        scheduler_task_b.state != TASK_STATE_READY ||
+        !runqueue_contains(&scheduler_task_b) ||
+        runqueue_count() != 1)
     {
         scheduler_test_fail(
-            "SCHEDULER FINAL CURRENT: FAILED\n"
+            "SCHEDULER FINAL OWNERSHIP: FAILED\n"
         );
     }
 
@@ -224,6 +365,14 @@ void scheduler_tests_run(void)
 
     serial_write_string(
         "SCHEDULER SELECTION: VERIFIED\n"
+    );
+
+    serial_write_string(
+        "SCHEDULER STATE REJECTIONS: VERIFIED\n"
+    );
+
+    serial_write_string(
+        "SCHEDULER OWNERSHIP INVARIANTS: VERIFIED\n"
     );
 
     serial_write_string(
