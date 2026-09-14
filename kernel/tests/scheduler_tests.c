@@ -363,6 +363,119 @@ void scheduler_tests_run(void)
         );
     }
 
+    /*
+     * PREEMPTION-1C scheduler ownership contract.
+     *
+     * This test deliberately stops before any architecture-level
+     * interrupt-frame handoff. The scheduler only decides which
+     * task owns the next execution context.
+     */
+    struct task *preempt_next = NULL;
+
+    if (scheduler_init() != 0)
+    {
+        scheduler_test_fail(
+            "SCHEDULER PREEMPT REINIT: FAILED\n"
+        );
+    }
+
+    scheduler_task_a.state = TASK_STATE_READY;
+    scheduler_task_b.state = TASK_STATE_READY;
+
+    if (scheduler_add(&scheduler_task_a) != 0 ||
+        scheduler_add(&scheduler_task_b) != 0 ||
+        scheduler_start() != 0)
+    {
+        scheduler_test_fail(
+            "SCHEDULER PREEMPT SETUP: FAILED\n"
+        );
+    }
+
+    if (scheduler_get_current() != &scheduler_task_a ||
+        scheduler_task_a.state != TASK_STATE_RUNNING ||
+        scheduler_task_b.state != TASK_STATE_READY ||
+        runqueue_count() != 1)
+    {
+        scheduler_test_fail(
+            "SCHEDULER PREEMPT INITIAL OWNERSHIP: FAILED\n"
+        );
+    }
+
+    if (scheduler_preempt_current(&preempt_next) != 0 ||
+        preempt_next != &scheduler_task_b)
+    {
+        scheduler_test_fail(
+            "SCHEDULER PREEMPT SELECTION: FAILED\n"
+        );
+    }
+
+    if (scheduler_get_current() != &scheduler_task_b ||
+        scheduler_task_b.state != TASK_STATE_RUNNING ||
+        runqueue_contains(&scheduler_task_b) ||
+        scheduler_task_a.state != TASK_STATE_READY ||
+        !runqueue_contains(&scheduler_task_a) ||
+        runqueue_count() != 1 ||
+        scheduler_get_dispatch_count() != 1)
+    {
+        scheduler_test_fail(
+            "SCHEDULER PREEMPT OWNERSHIP: FAILED\n"
+        );
+    }
+
+    /*
+     * No alternative READY task: preemption must leave the
+     * current task RUNNING and must not increment dispatch count.
+     */
+    if (scheduler_init() != 0)
+    {
+        scheduler_test_fail(
+            "SCHEDULER PREEMPT SINGLE REINIT: FAILED\n"
+        );
+    }
+
+    scheduler_task_a.state = TASK_STATE_READY;
+    scheduler_task_b.state = TASK_STATE_TERMINATED;
+
+    if (scheduler_add(&scheduler_task_a) != 0 ||
+        scheduler_start() != 0)
+    {
+        scheduler_test_fail(
+            "SCHEDULER PREEMPT SINGLE SETUP: FAILED\n"
+        );
+    }
+
+    preempt_next = NULL;
+
+    if (scheduler_preempt_current(&preempt_next) != 1 ||
+        preempt_next != &scheduler_task_a)
+    {
+        scheduler_test_fail(
+            "SCHEDULER PREEMPT CONTINUE CURRENT: FAILED\n"
+        );
+    }
+
+    if (scheduler_get_current() != &scheduler_task_a ||
+        scheduler_task_a.state != TASK_STATE_RUNNING ||
+        runqueue_count() != 0 ||
+        scheduler_get_dispatch_count() != 0)
+    {
+        scheduler_test_fail(
+            "SCHEDULER PREEMPT NO-SWITCH OWNERSHIP: FAILED\n"
+        );
+    }
+
+    serial_write_string(
+        "SCHEDULER PREEMPTIVE SELECTION: VERIFIED\n"
+    );
+
+    serial_write_string(
+        "SCHEDULER PREEMPTIVE OWNERSHIP: VERIFIED\n"
+    );
+
+    serial_write_string(
+        "SCHEDULER PREEMPTIVE NO-SWITCH: VERIFIED\n"
+    );
+
     serial_write_string(
         "SCHEDULER INIT: VERIFIED\n"
     );

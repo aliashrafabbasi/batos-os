@@ -145,6 +145,80 @@ int scheduler_yield(void)
     return 0;
 }
 
+int scheduler_preempt_current(struct task **next)
+{
+    struct task *current = scheduler_current;
+    struct task *selected;
+
+    if (next == NULL)
+    {
+        return -1;
+    }
+
+    *next = NULL;
+
+    if (current == NULL)
+    {
+        return -2;
+    }
+
+    if (current->state != TASK_STATE_RUNNING)
+    {
+        return -3;
+    }
+
+    /*
+     * A preemption request does not require a switch when no
+     * alternative READY task exists. Keep the current task as
+     * RUNNING and leave runqueue ownership unchanged.
+     */
+    selected = scheduler_peek_next();
+
+    if (selected == NULL)
+    {
+        *next = current;
+        return 1;
+    }
+
+    if (selected->state != TASK_STATE_READY)
+    {
+        return -4;
+    }
+
+    /*
+     * Do not change scheduler_current until both runqueue
+     * ownership transitions have succeeded.
+     */
+    current->state = TASK_STATE_READY;
+
+    if (runqueue_enqueue(current) != 0)
+    {
+        current->state = TASK_STATE_RUNNING;
+        return -5;
+    }
+
+    selected = scheduler_take_next();
+
+    if (selected == NULL)
+    {
+        runqueue_remove(current);
+        current->state = TASK_STATE_RUNNING;
+        return -6;
+    }
+
+    /*
+     * selected was validated as READY before dequeue. The runqueue
+     * owns the FIFO transition; no architecture state is touched.
+     */
+    selected->state = TASK_STATE_RUNNING;
+    scheduler_current = selected;
+    scheduler_dispatch_count++;
+
+    *next = selected;
+
+    return 0;
+}
+
 int scheduler_exit_current(struct task *task)
 {
     struct task *current = scheduler_current;
