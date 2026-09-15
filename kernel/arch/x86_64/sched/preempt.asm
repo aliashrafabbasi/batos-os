@@ -18,9 +18,9 @@ global x86_64_preempt_restore_and_iret
 ;
 ; The vector field is metadata and is not consumed by iretq.
 ;
-; This entry point is intentionally not connected to the timer
-; interrupt path yet. PREEMPTION-1B first establishes and tests
-; the frame/return ABI before integrating scheduling decisions.
+; This entry point is the architectural interrupt-return
+; boundary for LAPIC timer preemption. The timer path selects
+; a valid resumable frame before transferring control here.
 
 x86_64_preempt_restore_and_iret:
     mov rsp, rdi

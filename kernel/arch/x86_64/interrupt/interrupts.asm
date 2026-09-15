@@ -468,6 +468,8 @@ global lapic_spurious_stub
 extern irq_dispatch
 extern lapic_timer_interrupt
 extern lapic_eoi
+extern x86_64_preempt_handle_timer
+extern x86_64_preempt_restore_and_iret
 
 
 irq_common:
@@ -636,33 +638,36 @@ lapic_timer_stub:
     mov rbx, rsp
     and rsp, -16
 
+; First perform the LAPIC clock/timer accounting.
+; This preserves the existing LAPIC -> clock-event
+; architecture.
     call lapic_timer_interrupt
+
+; The timer frame is still the live interrupted state.
+; The architecture preemption bridge binds it to the
+; current task and asks the scheduler for the next owner.
+;
+; RAX = frame address to restore.
+    mov rdi, rbx
+    call x86_64_preempt_handle_timer
+
+; Preserve the selected frame across LAPIC EOI.
+; R12 is already part of the saved interrupt frame and
+; will be restored by x86_64_preempt_restore_and_iret.
+    mov r12, rax
 
     mov rsp, rbx
 
 ; Complete the Local APIC interrupt at the
 ; interrupt-exit boundary, before restoring
-; the interrupted CPU state.
+; the selected CPU state.
     call lapic_eoi
 
-    pop r15
-    pop r14
-    pop r13
-    pop r12
-    pop r11
-    pop r10
-    pop r9
-    pop r8
-    pop rdi
-    pop rsi
-    pop rbp
-    pop rdx
-    pop rcx
-    pop rbx
-    pop rax
-
-    add rsp, 8
-    iretq
+; Switch RSP to the selected task's resumable frame
+; and perform the architectural interrupt return.
+; This does not return.
+    mov rdi, r12
+    jmp x86_64_preempt_restore_and_iret
 
 ; ============================================================
 ; LAPIC spurious interrupt

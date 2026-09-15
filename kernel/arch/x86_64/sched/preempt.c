@@ -5,6 +5,7 @@
 #include "../interrupt/irq.h"
 
 #include "../../../sched/task.h"
+#include "../../../sched/scheduler.h"
 
 #include <stdint.h>
 #include <stddef.h>
@@ -12,6 +13,8 @@
 extern void x86_64_task_bootstrap_trampoline(void);
 
 #define X86_64_PREEMPT_INITIAL_RFLAGS 0x202ULL
+
+static uint64_t preempt_enabled = 0;
 
 static struct irq_frame *preempt_frame_from_state(
     const struct x86_64_preempt_state *state
@@ -99,4 +102,87 @@ int x86_64_preempt_prepare_first_run(
     state->valid = 1;
 
     return 0;
+}
+
+void x86_64_preempt_enable(void)
+{
+    preempt_enabled = 1;
+}
+
+void x86_64_preempt_disable(void)
+{
+    preempt_enabled = 0;
+}
+
+int x86_64_preempt_is_enabled(void)
+{
+    return preempt_enabled != 0;
+}
+
+uintptr_t x86_64_preempt_handle_timer(
+    struct irq_frame *frame
+)
+{
+    struct task *current;
+    struct task *next = NULL;
+
+    if (frame == NULL)
+        return 0;
+
+    /*
+     * The LAPIC timer remains a valid clock-event source even
+     * when scheduler-driven preemption is not active.
+     *
+     * The interrupt frame is therefore always the safe
+     * continuation until an explicit scheduler runtime
+     * activation enables preemption.
+     */
+    if (!preempt_enabled)
+        return (uintptr_t)frame;
+
+    current = scheduler_get_current();
+
+    if (current == NULL)
+        return (uintptr_t)frame;
+
+    /*
+     * The timer frame is the live architectural continuation
+     * of the currently running task. Bind it before asking the
+     * generic scheduler to transfer ownership.
+     */
+    current->preempt_state.frame_address =
+        (uintptr_t)frame;
+    current->preempt_state.valid = 1;
+
+    /*
+     * Scheduler policy/state transition is architecture-neutral.
+     * It returns the task that should own the next CPU context.
+     */
+    int result = scheduler_preempt_current(&next);
+
+    if (result < 0 || next == NULL)
+    {
+        /*
+         * Keep the current live frame as the safe continuation.
+         * The scheduler contract guarantees that an error leaves
+         * the current task running.
+         */
+        return (uintptr_t)frame;
+    }
+
+    /*
+     * No-switch case: the current task remains the owner of
+     * this exact interrupt frame.
+     */
+    if (next == current)
+        return (uintptr_t)frame;
+
+    /*
+     * Switch case: the selected READY task owns an architecture-
+     * valid resumable frame by the task lifecycle contract.
+     *
+     * That frame is either the synthetic first-run frame or a
+     * previously saved live interrupt frame.
+     */
+    return next->preempt_state.frame_address;
 }

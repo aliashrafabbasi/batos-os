@@ -32,6 +32,24 @@ void preempt_tests_run(void)
         "\nPREEMPTION-1B CONTRACT TEST\n"
     );
 
+    /*
+     * PREEMPTION-1D starts with scheduler-driven preemption
+     * disabled. The LAPIC timer remains independently active,
+     * and timer interrupts must return through their original
+     * architectural frame until scheduler runtime activation
+     * explicitly enables preemption.
+     */
+    if (x86_64_preempt_is_enabled() != 0)
+    {
+        preempt_test_fail(
+            "PREEMPTION DEFAULT STATE: INVALID\n"
+        );
+    }
+
+    serial_write_string(
+        "PREEMPTION DEFAULT STATE: VERIFIED\n"
+    );
+
     struct task task = {0};
 
     uint64_t pml4 = vmm_get_pml4();
