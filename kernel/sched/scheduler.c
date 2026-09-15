@@ -8,7 +8,7 @@
 static struct task *scheduler_current = NULL;
 static uint64_t scheduler_dispatch_count = 0;
 
-static struct task *scheduler_peek_next(void)
+struct task *scheduler_peek_next(void)
 {
     return runqueue_peek();
 }
@@ -145,7 +145,10 @@ int scheduler_yield(void)
     return 0;
 }
 
-int scheduler_preempt_current(struct task **next)
+int scheduler_preempt_current(
+    struct task *expected,
+    struct task **next
+)
 {
     struct task *current = scheduler_current;
     struct task *selected;
@@ -180,9 +183,19 @@ int scheduler_preempt_current(struct task **next)
         return 1;
     }
 
-    if (selected->state != TASK_STATE_READY)
+    /*
+     * The architecture layer validated `expected` before asking
+     * the scheduler to transfer ownership. The scheduler only
+     * accepts that exact FIFO head as the next owner.
+     */
+    if (expected == NULL || selected != expected)
     {
         return -4;
+    }
+
+    if (selected->state != TASK_STATE_READY)
+    {
+        return -5;
     }
 
     /*
@@ -194,7 +207,7 @@ int scheduler_preempt_current(struct task **next)
     if (runqueue_enqueue(current) != 0)
     {
         current->state = TASK_STATE_RUNNING;
-        return -5;
+        return -6;
     }
 
     selected = scheduler_take_next();
@@ -203,13 +216,22 @@ int scheduler_preempt_current(struct task **next)
     {
         runqueue_remove(current);
         current->state = TASK_STATE_RUNNING;
-        return -6;
+        return -7;
     }
 
     /*
-     * selected was validated as READY before dequeue. The runqueue
-     * owns the FIFO transition; no architecture state is touched.
+     * The dequeued task is the exact candidate validated by the
+     * caller. No architecture-specific continuation state is
+     * interpreted or modified here.
      */
+    if (selected != expected)
+    {
+        runqueue_remove(selected);
+        runqueue_remove(current);
+        current->state = TASK_STATE_RUNNING;
+        return -8;
+    }
+
     selected->state = TASK_STATE_RUNNING;
     scheduler_current = selected;
     scheduler_dispatch_count++;

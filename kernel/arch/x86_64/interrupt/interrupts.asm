@@ -470,6 +470,7 @@ extern lapic_timer_interrupt
 extern lapic_eoi
 extern x86_64_preempt_handle_timer
 extern x86_64_preempt_restore_and_iret
+extern x86_64_preempt_restore_context_and_resume
 
 
 irq_common:
@@ -638,6 +639,22 @@ lapic_timer_stub:
     mov rbx, rsp
     and rsp, -16
 
+; Reserve storage for the typed architecture resume target.
+;
+; struct x86_64_resume_target:
+;   offset 0 = kind
+;   offset 8 = context/frame pointer
+;   size     = 16
+; Keep the SysV AMD64 call-site stack alignment correct.
+;
+; After `and rsp, -16`, reserve 24 bytes:
+;   rsp + 0  .. 7   = alignment padding
+;   rsp + 8  .. 23  = struct x86_64_resume_target
+;
+; Therefore RSP is 8 mod 16 at each subsequent CALL site,
+; as required by the SysV AMD64 ABI.
+    sub rsp, 24
+
 ; First perform the LAPIC clock/timer accounting.
 ; This preserves the existing LAPIC -> clock-event
 ; architecture.
@@ -647,26 +664,62 @@ lapic_timer_stub:
 ; The architecture preemption bridge binds it to the
 ; current task and asks the scheduler for the next owner.
 ;
-; RAX = frame address to restore.
+; Arguments:
+;   RDI = live interrupt frame
+;   RSI = typed resume-target storage
     mov rdi, rbx
+    lea rsi, [rsp + 8]
     call x86_64_preempt_handle_timer
 
-; Preserve the selected frame across LAPIC EOI.
-; R12 is already part of the saved interrupt frame and
-; will be restored by x86_64_preempt_restore_and_iret.
-    mov r12, rax
+; Preserve the handler status across LAPIC EOI.
+;
+; R14 is callee-saved by the SysV AMD64 ABI and is already
+; part of the eventual CPU-state restoration path.
+    mov r14d, eax
 
-    mov rsp, rbx
+; Snapshot the typed target before LAPIC EOI.
+;
+; r12 = target kind
+; r13 = target context/frame pointer
+;
+; r12/r13 are callee-saved across lapic_eoi() and are
+; restored from the final selected continuation before
+; execution resumes.
+    mov r12d, [rsp + 8]
+    mov r13,  [rsp + 16]
 
-; Complete the Local APIC interrupt at the
-; interrupt-exit boundary, before restoring
-; the selected CPU state.
+; Complete the Local APIC interrupt while the temporary
+; aligned stack remains active. The live interrupt frame
+; must never become the CALL stack.
     call lapic_eoi
 
-; Switch RSP to the selected task's resumable frame
-; and perform the architectural interrupt return.
-; This does not return.
-    mov rdi, r12
+; The original interrupt-frame stack is restored only after
+; the EOI call has returned and will no longer push a return
+; address.
+    mov rsp, rbx
+
+; A handler error is treated as "continue the interrupted
+; task". The live frame remains authoritative in that case.
+    test r14d, r14d
+    js .timer_fallback
+
+; Dispatch according to the explicit architecture target kind.
+    cmp r12d, 1                  ; X86_64_RESUME_CONTEXT
+    je .timer_resume_context
+
+    cmp r12d, 2                  ; X86_64_RESUME_INTERRUPT
+    je .timer_resume_interrupt
+
+.timer_fallback:
+    mov rdi, rbx
+    jmp x86_64_preempt_restore_and_iret
+
+.timer_resume_context:
+    mov rdi, r13
+    jmp x86_64_preempt_restore_context_and_resume
+
+.timer_resume_interrupt:
+    mov rdi, r13
     jmp x86_64_preempt_restore_and_iret
 
 ; ============================================================

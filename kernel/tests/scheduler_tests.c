@@ -55,6 +55,12 @@ static void scheduler_prepare_context(
     task->entry = entry;
     task->argument = NULL;
 
+    /*
+     * This helper constructs a valid cooperative continuation
+     * directly, so its resume authority must be explicit.
+     */
+    task->resume_authority = TASK_RESUME_CONTEXT;
+
     task->context.rbx = 0;
     task->context.rbp = 0;
     task->context.r12 = 0;
@@ -382,6 +388,14 @@ void scheduler_tests_run(void)
     scheduler_task_a.state = TASK_STATE_READY;
     scheduler_task_b.state = TASK_STATE_READY;
 
+    /*
+     * PREEMPTION-1C reuses the manually constructed cooperative
+     * task contexts after the earlier cooperative dispatch test.
+     * Re-establish their canonical continuation authority explicitly.
+     */
+    scheduler_task_a.resume_authority = TASK_RESUME_CONTEXT;
+    scheduler_task_b.resume_authority = TASK_RESUME_CONTEXT;
+
     if (scheduler_add(&scheduler_task_a) != 0 ||
         scheduler_add(&scheduler_task_b) != 0 ||
         scheduler_start() != 0)
@@ -401,7 +415,10 @@ void scheduler_tests_run(void)
         );
     }
 
-    if (scheduler_preempt_current(&preempt_next) != 0 ||
+    if (scheduler_preempt_current(
+            &scheduler_task_b,
+            &preempt_next
+        ) != 0 ||
         preempt_next != &scheduler_task_b)
     {
         scheduler_test_fail(
@@ -436,6 +453,12 @@ void scheduler_tests_run(void)
     scheduler_task_a.state = TASK_STATE_READY;
     scheduler_task_b.state = TASK_STATE_TERMINATED;
 
+    /*
+     * Re-establish the canonical continuation authority for the
+     * manually constructed cooperative task used in this case.
+     */
+    scheduler_task_a.resume_authority = TASK_RESUME_CONTEXT;
+
     if (scheduler_add(&scheduler_task_a) != 0 ||
         scheduler_start() != 0)
     {
@@ -446,7 +469,10 @@ void scheduler_tests_run(void)
 
     preempt_next = NULL;
 
-    if (scheduler_preempt_current(&preempt_next) != 1 ||
+    if (scheduler_preempt_current(
+            NULL,
+            &preempt_next
+        ) != 1 ||
         preempt_next != &scheduler_task_a)
     {
         scheduler_test_fail(

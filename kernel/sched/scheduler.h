@@ -9,6 +9,16 @@ int scheduler_init(void);
 
 struct task *scheduler_get_current(void);
 
+/*
+ * Inspect the next READY scheduler candidate without changing
+ * scheduler ownership, task state, or runqueue ownership.
+ *
+ * Returns:
+ *   non-NULL - next READY candidate
+ *   NULL     - no READY candidate exists
+ */
+struct task *scheduler_peek_next(void);
+
 int scheduler_start(void);
 
 int scheduler_add(struct task *task);
@@ -19,16 +29,22 @@ int scheduler_yield(void);
  * Perform the scheduler ownership transition for a preempted
  * current task without performing an architecture context switch.
  *
+ * `expected` must be the READY task previously observed by the
+ * caller as the next scheduler candidate.
+ *
  * Return values:
- *   0  - another READY task was selected
+ *   0  - expected task was selected
  *   1  - no alternative READY task exists; current continues
  *  <0  - scheduler error
  *
  * On success, *next is the task that owns the next CPU execution
- * context. The architecture layer owns the actual interrupt-frame
+ * context. The architecture layer owns the actual continuation
  * handoff.
  */
-int scheduler_preempt_current(struct task **next);
+int scheduler_preempt_current(
+    struct task *expected,
+    struct task **next
+);
 
 int scheduler_exit_current(struct task *task);
 

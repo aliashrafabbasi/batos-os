@@ -119,82 +119,151 @@ int x86_64_preempt_is_enabled(void)
     return preempt_enabled != 0;
 }
 
-uintptr_t x86_64_preempt_handle_timer(
-    struct irq_frame *frame
+static int x86_64_preempt_resolve_target(
+    struct task *task,
+    struct x86_64_resume_target *target
+)
+{
+    if (task == NULL || target == NULL)
+        return -1;
+
+    target->kind = X86_64_RESUME_NONE;
+    target->context = NULL;
+
+    /*
+     * The generic scheduler records the authoritative continuation
+     * kind. The architecture layer alone resolves that authority
+     * into an architecture-specific transfer target.
+     */
+    if (task->resume_authority == TASK_RESUME_CONTEXT)
+    {
+        target->kind = X86_64_RESUME_CONTEXT;
+        target->context = &task->context;
+        return 0;
+    }
+
+    if (task->resume_authority == TASK_RESUME_INTERRUPT &&
+        x86_64_preempt_state_is_valid(&task->preempt_state))
+    {
+        target->kind = X86_64_RESUME_INTERRUPT;
+        target->frame =
+            (struct irq_frame *)(uintptr_t)
+                task->preempt_state.frame_address;
+        return 0;
+    }
+
+    return -2;
+}
+
+int x86_64_preempt_handle_timer(
+    struct irq_frame *frame,
+    struct x86_64_resume_target *target
 )
 {
     struct task *current;
     struct task *next = NULL;
 
-    if (frame == NULL)
-        return 0;
+    if (frame == NULL || target == NULL)
+        return -1;
+
+    target->kind = X86_64_RESUME_NONE;
+    target->frame = NULL;
 
     /*
-     * The LAPIC timer remains a valid clock-event source even
-     * when scheduler-driven preemption is not active.
-     *
-     * The interrupt frame is therefore always the safe
-     * continuation until an explicit scheduler runtime
-     * activation enables preemption.
+     * With scheduler-driven preemption disabled, the interrupted
+     * task's live interrupt frame remains the only continuation.
      */
     if (!preempt_enabled)
-        return (uintptr_t)frame;
+    {
+        target->kind = X86_64_RESUME_INTERRUPT;
+        target->frame = frame;
+        return 0;
+    }
 
     current = scheduler_get_current();
 
     if (current == NULL)
-        return (uintptr_t)frame;
+    {
+        target->kind = X86_64_RESUME_INTERRUPT;
+        target->frame = frame;
+        return 0;
+    }
 
     /*
-     * The timer frame is the live architectural continuation
-     * of the currently running task. Bind it before asking the
-     * generic scheduler to transfer ownership.
+     * The timer frame becomes the current task's authoritative
+     * continuation before scheduler ownership is evaluated.
      */
     current->preempt_state.frame_address =
         (uintptr_t)frame;
     current->preempt_state.valid = 1;
+    current->resume_authority = TASK_RESUME_INTERRUPT;
 
     /*
-     * The live timer frame is now the current task's
-     * authoritative continuation. This transition belongs
-     * to the architecture boundary because only this layer
-     * owns and interprets the interrupt-return representation.
-     *
-     * A fresh task remains CONTEXT-authoritative: its
-     * synthetic preemptive frame is only a first-run adapter.
+     * First inspect the scheduler candidate without changing
+     * ownership. The generic scheduler remains responsible for
+     * the actual READY/RUNNING transition.
      */
-    current->resume_authority =
-        TASK_RESUME_INTERRUPT;
+    struct task *candidate = scheduler_peek_next();
 
-    /*
-     * Scheduler policy/state transition is architecture-neutral.
-     * It returns the task that should own the next CPU context.
-     */
-    int result = scheduler_preempt_current(&next);
-
-    if (result < 0 || next == NULL)
+    if (candidate == NULL)
     {
-        /*
-         * Keep the current live frame as the safe continuation.
-         * The scheduler contract guarantees that an error leaves
-         * the current task running.
-         */
-        return (uintptr_t)frame;
+        target->kind = X86_64_RESUME_INTERRUPT;
+        target->frame = frame;
+        return 0;
     }
 
     /*
-     * No-switch case: the current task remains the owner of
-     * this exact interrupt frame.
+     * A candidate must have a valid authoritative continuation
+     * before it can become the next CPU owner.
      */
-    if (next == current)
-        return (uintptr_t)frame;
+    struct x86_64_resume_target candidate_target;
+
+    if (x86_64_preempt_resolve_target(
+            candidate,
+            &candidate_target) != 0)
+    {
+        /*
+         * The candidate is not architecturally resumable.
+         * Do not ask the generic scheduler to transfer ownership.
+         */
+        target->kind = X86_64_RESUME_INTERRUPT;
+        target->frame = frame;
+        return 0;
+    }
 
     /*
-     * Switch case: the selected READY task owns an architecture-
-     * valid resumable frame by the task lifecycle contract.
-     *
-     * That frame is either the synthetic first-run frame or a
-     * previously saved live interrupt frame.
+     * Perform the architecture-neutral scheduler ownership
+     * transition using only the exact candidate whose
+     * continuation was validated above. The architecture layer
+     * already owns the fully resolved transfer target, so no
+     * architecture state needs to be resolved after ownership
+     * transfer.
      */
-    return next->preempt_state.frame_address;
+    int result = scheduler_preempt_current(candidate, &next);
+
+    if (result < 0 || next == NULL)
+    {
+        target->kind = X86_64_RESUME_INTERRUPT;
+        target->frame = frame;
+        return 0;
+    }
+
+    /*
+     * No-switch case: current retains the live interrupt frame.
+     */
+    if (next == current)
+    {
+        target->kind = X86_64_RESUME_INTERRUPT;
+        target->frame = frame;
+        return 0;
+    }
+
+    /*
+     * `candidate_target` was resolved before scheduler ownership
+     * transfer and therefore remains the authoritative typed
+     * architecture handoff target.
+     */
+    *target = candidate_target;
+
+    return 0;
 }

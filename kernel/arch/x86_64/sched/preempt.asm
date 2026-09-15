@@ -43,3 +43,39 @@ x86_64_preempt_restore_and_iret:
 
     add rsp, 8                  ; discard vector
     iretq
+
+
+; void x86_64_preempt_restore_context_and_resume(
+;     const struct x86_64_context *next
+; );
+;
+; SysV AMD64:
+;   RDI = next context
+;
+; Restore a cooperative task continuation selected by
+; scheduler-driven timer preemption.
+;
+; Unlike x86_64_context_restore(), this boundary is entered
+; from an interrupt context with IF cleared by hardware.
+; Therefore interrupts are explicitly re-enabled immediately
+; before entering the restored continuation.
+;
+; The STI is followed directly by JMP. Per x86 interrupt
+; semantics, the pending interrupt recognition boundary occurs
+; after the instruction immediately following STI.
+
+global x86_64_preempt_restore_context_and_resume
+
+x86_64_preempt_restore_context_and_resume:
+    mov rbx, [rdi + 0]
+    mov rbp, [rdi + 8]
+    mov r12, [rdi + 16]
+    mov r13, [rdi + 24]
+    mov r14, [rdi + 32]
+    mov r15, [rdi + 40]
+
+    mov rsp, [rdi + 48]
+    mov rax, [rdi + 56]
+
+    sti
+    jmp rax
