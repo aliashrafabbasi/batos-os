@@ -37,4 +37,13 @@ void x86_64_context_switch(
     const struct x86_64_context *next
 );
 
+void x86_64_context_save(
+    struct x86_64_context *current
+);
+
+__attribute__((noreturn))
+void x86_64_context_restore(
+    const struct x86_64_context *next
+);
+
 #endif
