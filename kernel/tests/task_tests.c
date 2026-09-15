@@ -80,6 +80,7 @@ void task_tests_run(void)
         pmm_get_free_frames();
 
     if (task.state != TASK_STATE_READY ||
+        task.resume_authority != TASK_RESUME_CONTEXT ||
         task.kernel_stack_base == 0 ||
         task.kernel_stack_top <=
             task.kernel_stack_base ||
@@ -177,6 +178,13 @@ void task_tests_run(void)
     {
         task_test_fail(
             "TASK DESTROY: FAILED\n"
+        );
+    }
+
+    if (task.resume_authority != TASK_RESUME_NONE)
+    {
+        task_test_fail(
+            "TASK RESUME AUTHORITY CLEANUP: FAILED\n"
         );
     }
 

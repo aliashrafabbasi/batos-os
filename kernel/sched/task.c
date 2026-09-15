@@ -265,6 +265,15 @@ int task_create(
     task->entry = entry;
     task->argument = argument;
 
+    /*
+     * The initial task continuation is the established
+     * cooperative context ABI. The interrupt-return frame
+     * is prepared as an additional architecture-owned
+     * first-run representation but is not authoritative yet.
+     */
+    task->resume_authority =
+        TASK_RESUME_CONTEXT;
+
     task->preempt_state.frame_address = 0;
     task->preempt_state.valid = 0;
 
@@ -405,6 +414,8 @@ int task_destroy(struct task *task)
      */
     task->preempt_state.frame_address = 0;
     task->preempt_state.valid = 0;
+    task->resume_authority =
+        TASK_RESUME_NONE;
 
     return 0;
 }

@@ -74,6 +74,13 @@ void preempt_tests_run(void)
         );
     }
 
+    if (task.resume_authority != TASK_RESUME_CONTEXT)
+    {
+        preempt_test_fail(
+            "PREEMPT INITIAL RESUME AUTHORITY: INVALID\n"
+        );
+    }
+
     if (!x86_64_preempt_state_is_valid(
             &task.preempt_state
         ))
@@ -226,7 +233,8 @@ void preempt_tests_run(void)
         );
     }
 
-    if (task.preempt_state.valid != 0 ||
+    if (task.resume_authority != TASK_RESUME_NONE ||
+        task.preempt_state.valid != 0 ||
         task.preempt_state.frame_address != 0 ||
         x86_64_preempt_state_is_valid(
             &task.preempt_state

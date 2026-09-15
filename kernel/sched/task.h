@@ -27,6 +27,20 @@ enum task_state
     TASK_STATE_TERMINATED
 };
 
+/*
+ * Identifies the authoritative execution continuation owned by
+ * a READY task.
+ *
+ * The generic scheduler owns this authority value but does not
+ * interpret architecture-specific saved state.
+ */
+enum task_resume_authority
+{
+    TASK_RESUME_NONE = 0,
+    TASK_RESUME_CONTEXT,
+    TASK_RESUME_INTERRUPT
+};
+
 struct task;
 
 typedef void (*task_entry_t)(void *argument);
@@ -56,6 +70,12 @@ struct task
 
     task_entry_t entry;
     void *argument;
+
+    /*
+     * Identifies which architecture-owned continuation is
+     * authoritative when this task is resumed.
+     */
+    enum task_resume_authority resume_authority;
 
     /*
      * Architecture-owned resumable interrupt-return state.
