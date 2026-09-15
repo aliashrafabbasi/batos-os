@@ -155,6 +155,18 @@ uintptr_t x86_64_preempt_handle_timer(
     current->preempt_state.valid = 1;
 
     /*
+     * The live timer frame is now the current task's
+     * authoritative continuation. This transition belongs
+     * to the architecture boundary because only this layer
+     * owns and interprets the interrupt-return representation.
+     *
+     * A fresh task remains CONTEXT-authoritative: its
+     * synthetic preemptive frame is only a first-run adapter.
+     */
+    current->resume_authority =
+        TASK_RESUME_INTERRUPT;
+
+    /*
      * Scheduler policy/state transition is architecture-neutral.
      * It returns the task that should own the next CPU context.
      */
