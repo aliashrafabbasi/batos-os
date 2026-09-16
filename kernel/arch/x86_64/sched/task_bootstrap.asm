@@ -15,5 +15,6 @@ extern task_bootstrap_entry
 ; task bootstrap without introducing another call frame.
 
 x86_64_task_bootstrap_trampoline:
+    sti
     mov rdi, [rsp + 8]
     jmp task_bootstrap_entry
