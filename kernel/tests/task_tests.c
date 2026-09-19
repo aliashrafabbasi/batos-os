@@ -253,6 +253,44 @@ void task_tests_run(void)
         );
     }
 
+    /*
+     * Runnable ownership must block destruction. A failed
+     * destroy attempt must leave the task completely intact.
+     */
+    uint64_t lifecycle_stack_base =
+        lifecycle_task.kernel_stack_base;
+
+    uint64_t lifecycle_stack_top =
+        lifecycle_task.kernel_stack_top;
+
+    enum task_state lifecycle_state =
+        lifecycle_task.state;
+
+    enum task_resume_authority lifecycle_resume_authority =
+        lifecycle_task.resume_authority;
+
+    if (task_destroy(&lifecycle_task) == 0)
+    {
+        task_test_fail(
+            "TASK LIFECYCLE RUNQUEUE DESTROY: ACCEPTED\n"
+        );
+    }
+
+    if (!runqueue_contains(&lifecycle_task) ||
+        lifecycle_task.kernel_stack_base !=
+            lifecycle_stack_base ||
+        lifecycle_task.kernel_stack_top !=
+            lifecycle_stack_top ||
+        lifecycle_task.state !=
+            lifecycle_state ||
+        lifecycle_task.resume_authority !=
+            lifecycle_resume_authority)
+    {
+        task_test_fail(
+            "TASK LIFECYCLE RUNQUEUE DESTROY: CORRUPTED\n"
+        );
+    }
+
     if (runqueue_remove(&lifecycle_task) != 0 ||
         runqueue_contains(&lifecycle_task))
     {
@@ -305,6 +343,46 @@ void task_tests_run(void)
     {
         task_test_fail(
             "TASK LIFECYCLE REGISTRY OWNERSHIP: FAILED\n"
+        );
+    }
+
+    /*
+     * Registry ownership must independently block destruction.
+     * The failed destroy must not release task-owned resources.
+     */
+    uint64_t registry_stack_base =
+        registry_lifecycle_task.kernel_stack_base;
+
+    uint64_t registry_stack_top =
+        registry_lifecycle_task.kernel_stack_top;
+
+    enum task_state registry_state =
+        registry_lifecycle_task.state;
+
+    enum task_resume_authority registry_resume_authority =
+        registry_lifecycle_task.resume_authority;
+
+    if (task_destroy(&registry_lifecycle_task) == 0)
+    {
+        task_test_fail(
+            "TASK LIFECYCLE REGISTRY DESTROY: ACCEPTED\n"
+        );
+    }
+
+    if (!task_registry_contains(
+            &registry_lifecycle_task
+        ) ||
+        registry_lifecycle_task.kernel_stack_base !=
+            registry_stack_base ||
+        registry_lifecycle_task.kernel_stack_top !=
+            registry_stack_top ||
+        registry_lifecycle_task.state !=
+            registry_state ||
+        registry_lifecycle_task.resume_authority !=
+            registry_resume_authority)
+    {
+        task_test_fail(
+            "TASK LIFECYCLE REGISTRY DESTROY: CORRUPTED\n"
         );
     }
 

@@ -2,6 +2,9 @@
 
 #include "../arch/x86_64/sched/preempt.h"
 
+#include "runqueue.h"
+#include "task_registry.h"
+
 #include "../mm/pmm/pmm.h"
 #include "../mm/vmm/vmm.h"
 
@@ -382,6 +385,16 @@ int task_destroy(struct task *task)
         return -1;
 
     if (task->state == TASK_STATE_RUNNING)
+        return -1;
+
+    /*
+     * Task-owned resources may only be destroyed after
+     * scheduler and registry ownership have been released.
+     */
+    if (runqueue_contains(task))
+        return -1;
+
+    if (task_registry_contains(task))
         return -1;
 
     if (task->kernel_stack_base != 0)

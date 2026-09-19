@@ -53,6 +53,21 @@ int task_registry_register(
     return 0;
 }
 
+int task_registry_contains(
+    const struct task *task
+)
+{
+    if (!task_registry_initialized ||
+        task == NULL ||
+        task->id == 0 ||
+        task->id > TASK_MAX_TASKS)
+    {
+        return 0;
+    }
+
+    return task_registry[task->id - 1] == task;
+}
+
 int task_registry_unregister(
     struct task *task
 )

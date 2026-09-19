@@ -21,6 +21,10 @@ int task_registry_unregister(
     struct task *task
 );
 
+int task_registry_contains(
+    const struct task *task
+);
+
 struct task *task_registry_find(
     uint64_t id
 );
