@@ -24,6 +24,18 @@
 #include "kernel/tests/runqueue_tests.h"
 #include "kernel/tests/scheduler_tests.h"
 
+/*
+ * Enter the live interrupt-driven runtime phase.
+ *
+ * Kernel bring-up and deterministic verification are complete
+ * before this boundary. From here onward, hardware interrupts
+ * are intentionally part of normal runtime.
+ */
+static void interrupts_enable_for_runtime(void)
+{
+    __asm__ volatile ("sti" ::: "memory");
+}
+
 void kernel_main(void)
 {
     boot_init();
@@ -289,6 +301,17 @@ void kernel_main(void)
     scheduler_tests_run();
 
     preempt_authority_tests_run();
+
+    /*
+     * Explicit transition from deterministic kernel bring-up
+     * into live interrupt-driven runtime.
+     *
+     * The timer-driven preemption runtime test executes after
+     * this boundary and therefore observes real hardware
+     * interrupt delivery.
+     */
+    interrupts_enable_for_runtime();
+
     preempt_runtime_tests_run();
 
     serial_write_string(

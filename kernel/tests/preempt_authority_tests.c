@@ -148,6 +148,8 @@ static void preempt_authority_test_no_candidate(void)
         );
     }
 
+    __asm__ volatile ("cli" ::: "memory");
+
     x86_64_preempt_enable();
 
     if (x86_64_preempt_handle_timer(
@@ -364,8 +366,6 @@ void preempt_authority_tests_run(void)
     preempt_authority_test_invalid_candidate();
 
     x86_64_preempt_disable();
-
-    __asm__ volatile ("sti" ::: "memory");
 
     serial_write_string(
         "PREEMPTION-3 CONTINUATION AUTHORITY: VERIFIED\n"
