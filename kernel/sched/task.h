@@ -96,6 +96,11 @@ int task_create(
     void *argument
 );
 
+int task_transition(
+    struct task *task,
+    enum task_state new_state
+);
+
 int task_set_exit_handler(
     task_exit_handler_t handler
 );

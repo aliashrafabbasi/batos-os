@@ -42,11 +42,99 @@ static void task_test_fail(const char *message)
         __asm__ volatile ("cli\nhlt");
 }
 
+static void task_transition_contract_test(void)
+{
+    /*
+     * SCHED-2 lifecycle contract matrix.
+     *
+     * The matrix is indexed as:
+     *
+     *   [current_state][requested_state]
+     *
+     * 1 = legal transition
+     * 0 = rejected transition
+     */
+    static const uint8_t allowed[
+        6
+    ][
+        6
+    ] =
+    {
+        /* NEW        */
+        { 0, 1, 0, 0, 0, 0 },
+
+        /* READY      */
+        { 0, 0, 1, 0, 0, 0 },
+
+        /* RUNNING    */
+        { 0, 1, 0, 1, 1, 1 },
+
+        /* BLOCKED    */
+        { 0, 1, 0, 0, 0, 0 },
+
+        /* SLEEPING   */
+        { 0, 1, 0, 0, 0, 0 },
+
+        /* TERMINATED */
+        { 0, 0, 0, 0, 0, 0 }
+    };
+
+    for (uint64_t from = TASK_STATE_NEW;
+         from <= TASK_STATE_TERMINATED;
+         from++)
+    {
+        for (uint64_t to = TASK_STATE_NEW;
+             to <= TASK_STATE_TERMINATED;
+             to++)
+        {
+            struct task task = {0};
+
+            task.state =
+                (enum task_state)from;
+
+            int result =
+                task_transition(
+                    &task,
+                    (enum task_state)to
+                );
+
+            if (allowed[from][to])
+            {
+                if (result != 0 ||
+                    task.state !=
+                        (enum task_state)to)
+                {
+                    task_test_fail(
+                        "TASK LIFECYCLE TRANSITION: LEGAL REJECTED\n"
+                    );
+                }
+            }
+            else
+            {
+                if (result == 0 ||
+                    task.state !=
+                        (enum task_state)from)
+                {
+                    task_test_fail(
+                        "TASK LIFECYCLE TRANSITION: INVALID ACCEPTED\n"
+                    );
+                }
+            }
+        }
+    }
+
+    serial_write_string(
+        "TASK LIFECYCLE TRANSITIONS: VERIFIED\n"
+    );
+}
+
 void task_tests_run(void)
 {
     serial_write_string(
         "\nTASK FOUNDATION TEST\n"
     );
+
+    task_transition_contract_test();
 
     struct task task = {0};
 

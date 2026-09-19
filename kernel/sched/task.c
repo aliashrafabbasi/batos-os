@@ -173,6 +173,58 @@ static int task_unmap_stack(struct task *task)
 
 static task_exit_handler_t task_exit_handler = NULL;
 
+int task_transition(
+    struct task *task,
+    enum task_state new_state
+)
+{
+    if (task == NULL)
+        return -1;
+
+    switch (task->state)
+    {
+        case TASK_STATE_NEW:
+            if (new_state != TASK_STATE_READY)
+                return -1;
+            break;
+
+        case TASK_STATE_READY:
+            if (new_state != TASK_STATE_RUNNING)
+                return -1;
+            break;
+
+        case TASK_STATE_RUNNING:
+            if (new_state != TASK_STATE_READY &&
+                new_state != TASK_STATE_BLOCKED &&
+                new_state != TASK_STATE_SLEEPING &&
+                new_state != TASK_STATE_TERMINATED)
+            {
+                return -1;
+            }
+            break;
+
+        case TASK_STATE_BLOCKED:
+            if (new_state != TASK_STATE_READY)
+                return -1;
+            break;
+
+        case TASK_STATE_SLEEPING:
+            if (new_state != TASK_STATE_READY)
+                return -1;
+            break;
+
+        case TASK_STATE_TERMINATED:
+            return -1;
+
+        default:
+            return -1;
+    }
+
+    task->state = new_state;
+    return 0;
+}
+
+
 extern void x86_64_task_bootstrap_trampoline(void);
 
 void task_bootstrap_entry(struct task *current)
@@ -348,8 +400,13 @@ int task_create(
         return -1;
     }
 
-    task->state =
-        TASK_STATE_READY;
+    if (task_transition(
+            task,
+            TASK_STATE_READY
+        ) != 0)
+    {
+        return -1;
+    }
 
     return 0;
 }
@@ -373,10 +430,10 @@ int task_exit(struct task *task)
     if (task->state != TASK_STATE_RUNNING)
         return -1;
 
-    task->state =
-        TASK_STATE_TERMINATED;
-
-    return 0;
+    return task_transition(
+        task,
+        TASK_STATE_TERMINATED
+    );
 }
 
 int task_destroy(struct task *task)

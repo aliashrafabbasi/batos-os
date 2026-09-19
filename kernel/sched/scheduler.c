@@ -64,7 +64,12 @@ int scheduler_start(void)
         return -4;
     }
 
-    next->state = TASK_STATE_RUNNING;
+    if (task_transition(next, TASK_STATE_RUNNING) != 0)
+    {
+        runqueue_enqueue(next);
+        return -5;
+    }
+
     scheduler_current = next;
 
     return 0;
@@ -100,11 +105,16 @@ int scheduler_yield(void)
         return -2;
     }
 
-    current->state = TASK_STATE_READY;
+    if (task_transition(current, TASK_STATE_READY) != 0)
+    {
+        return -3;
+    }
 
     if (runqueue_enqueue(current) != 0)
     {
-        current->state = TASK_STATE_RUNNING;
+        if (task_transition(current, TASK_STATE_RUNNING) != 0)
+            return -3;
+
         return -3;
     }
 
@@ -113,14 +123,20 @@ int scheduler_yield(void)
     if (next == NULL)
     {
         runqueue_remove(current);
-        current->state = TASK_STATE_RUNNING;
+
+        if (task_transition(current, TASK_STATE_RUNNING) != 0)
+            return -4;
+
         return -4;
     }
 
     if (next->state != TASK_STATE_READY)
     {
         runqueue_remove(current);
-        current->state = TASK_STATE_RUNNING;
+
+        if (task_transition(current, TASK_STATE_RUNNING) != 0)
+            return -5;
+
         return -5;
     }
 
@@ -129,11 +145,24 @@ int scheduler_yield(void)
     if (next == NULL)
     {
         runqueue_remove(current);
-        current->state = TASK_STATE_RUNNING;
+
+        if (task_transition(current, TASK_STATE_RUNNING) != 0)
+            return -6;
+
         return -6;
     }
 
-    next->state = TASK_STATE_RUNNING;
+    if (task_transition(next, TASK_STATE_RUNNING) != 0)
+    {
+        runqueue_enqueue(next);
+        runqueue_remove(current);
+
+        if (task_transition(current, TASK_STATE_RUNNING) != 0)
+            return -7;
+
+        return -7;
+    }
+
     scheduler_current = next;
     scheduler_dispatch_count++;
 
@@ -202,11 +231,16 @@ int scheduler_preempt_current(
      * Do not change scheduler_current until both runqueue
      * ownership transitions have succeeded.
      */
-    current->state = TASK_STATE_READY;
+    if (task_transition(current, TASK_STATE_READY) != 0)
+    {
+        return -6;
+    }
 
     if (runqueue_enqueue(current) != 0)
     {
-        current->state = TASK_STATE_RUNNING;
+        if (task_transition(current, TASK_STATE_RUNNING) != 0)
+            return -6;
+
         return -6;
     }
 
@@ -215,7 +249,10 @@ int scheduler_preempt_current(
     if (selected == NULL)
     {
         runqueue_remove(current);
-        current->state = TASK_STATE_RUNNING;
+
+        if (task_transition(current, TASK_STATE_RUNNING) != 0)
+            return -7;
+
         return -7;
     }
 
@@ -226,13 +263,26 @@ int scheduler_preempt_current(
      */
     if (selected != expected)
     {
-        runqueue_remove(selected);
+        runqueue_enqueue(selected);
         runqueue_remove(current);
-        current->state = TASK_STATE_RUNNING;
+
+        if (task_transition(current, TASK_STATE_RUNNING) != 0)
+            return -8;
+
         return -8;
     }
 
-    selected->state = TASK_STATE_RUNNING;
+    if (task_transition(selected, TASK_STATE_RUNNING) != 0)
+    {
+        runqueue_enqueue(selected);
+        runqueue_remove(current);
+
+        if (task_transition(current, TASK_STATE_RUNNING) != 0)
+            return -8;
+
+        return -8;
+    }
+
     scheduler_current = selected;
     scheduler_dispatch_count++;
 
@@ -287,7 +337,12 @@ int scheduler_exit_current(struct task *task)
         return -4;
     }
 
-    next->state = TASK_STATE_RUNNING;
+    if (task_transition(next, TASK_STATE_RUNNING) != 0)
+    {
+        runqueue_enqueue(next);
+        return -5;
+    }
+
     scheduler_current = next;
     scheduler_dispatch_count++;
 
