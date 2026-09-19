@@ -10,3 +10,7 @@ build/
 
 # Temporary QEMU/debug files
 qemu.log
+
+# Generated ISO root contents
+iso_root/EFI/
+iso_root/boot/
