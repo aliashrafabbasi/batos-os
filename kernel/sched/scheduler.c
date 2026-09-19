@@ -166,6 +166,13 @@ int scheduler_yield(void)
     scheduler_current = next;
     scheduler_dispatch_count++;
 
+    /*
+     * The current task is resuming through its cooperative
+     * saved context. Any older interrupt continuation must
+     * no longer be authoritative.
+     */
+    current->resume_authority = TASK_RESUME_CONTEXT;
+
     x86_64_context_switch(
         &current->context,
         &next->context

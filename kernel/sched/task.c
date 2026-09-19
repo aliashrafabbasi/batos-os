@@ -430,10 +430,21 @@ int task_exit(struct task *task)
     if (task->state != TASK_STATE_RUNNING)
         return -1;
 
-    return task_transition(
+    int result = task_transition(
         task,
         TASK_STATE_TERMINATED
     );
+
+    if (result != 0)
+        return result;
+
+    /*
+     * A terminated task has no resumable continuation.
+     * Invalidate any previously authoritative context/frame.
+     */
+    task->resume_authority = TASK_RESUME_NONE;
+
+    return 0;
 }
 
 int task_destroy(struct task *task)

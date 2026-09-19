@@ -84,10 +84,26 @@ static void scheduler_test_a(void *argument)
         );
     }
 
+    /*
+     * Deliberately leave an old interrupt continuation authoritative
+     * before the cooperative handoff. A successful yield must replace
+     * that authority with the task's cooperative context.
+     */
+    scheduler_task_a.resume_authority =
+        TASK_RESUME_INTERRUPT;
+
     if (scheduler_yield() != 0)
     {
         scheduler_test_fail(
             "SCHEDULER A YIELD: FAILED\n"
+        );
+    }
+
+    if (scheduler_task_a.resume_authority !=
+        TASK_RESUME_CONTEXT)
+    {
+        scheduler_test_fail(
+            "SCHEDULER A YIELD AUTHORITY: FAILED\n"
         );
     }
 
@@ -528,5 +544,9 @@ void scheduler_tests_run(void)
 
     serial_write_string(
         "SCHEDULER COOPERATIVE DISPATCH: VERIFIED\n"
+    );
+
+    serial_write_string(
+        "SCHEDULER COOPERATIVE AUTHORITY: VERIFIED\n"
     );
 }

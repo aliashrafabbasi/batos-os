@@ -593,6 +593,10 @@ void task_tests_run(void)
     );
 
     serial_write_string(
+        "TASK EXIT AUTHORITY: VERIFIED\n"
+    );
+
+    serial_write_string(
         "TASK TERMINATION DISPATCH: VERIFIED\n"
     );
 }
@@ -609,6 +613,13 @@ static void task_execution_test_a(void *argument)
         );
     }
 
+    /*
+     * Simulate an older interrupt continuation becoming stale while
+     * the task is still running. task_exit() must invalidate it.
+     */
+    task_execution_a.resume_authority =
+        TASK_RESUME_INTERRUPT;
+
     task_execution_a_terminated = 1;
 }
 
@@ -617,6 +628,19 @@ static void task_execution_test_b(void *argument)
     (void)argument;
 
     task_execution_b_reached = 1;
+
+    /*
+     * Task A returned from its entry with stale INTERRUPT authority.
+     * The bootstrap path called task_exit(), so a terminated task
+     * must no longer have any resumable continuation authority.
+     */
+    if (task_execution_a.resume_authority !=
+        TASK_RESUME_NONE)
+    {
+        task_test_fail(
+            "TASK EXIT AUTHORITY: FAILED\n"
+        );
+    }
 
     /*
      * Return control to the test harness without returning into
