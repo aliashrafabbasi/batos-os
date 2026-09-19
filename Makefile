@@ -33,6 +33,7 @@ C_SOURCES = \
     kernel/tests/task_tests.c \
     kernel/tests/preempt_tests.c \
     kernel/tests/preempt_runtime_tests.c \
+    kernel/tests/preempt_authority_tests.c \
     kernel/tests/task_registry_tests.c \
     kernel/tests/runqueue_tests.c \
     kernel/tests/scheduler_tests.c \

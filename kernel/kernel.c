@@ -19,6 +19,7 @@
 #include "kernel/tests/task_tests.h"
 #include "kernel/tests/preempt_tests.h"
 #include "kernel/tests/preempt_runtime_tests.h"
+#include "kernel/tests/preempt_authority_tests.h"
 #include "kernel/tests/task_registry_tests.h"
 #include "kernel/tests/runqueue_tests.h"
 #include "kernel/tests/scheduler_tests.h"
@@ -287,6 +288,7 @@ void kernel_main(void)
     runqueue_tests_run();
     scheduler_tests_run();
 
+    preempt_authority_tests_run();
     preempt_runtime_tests_run();
 
     serial_write_string(
