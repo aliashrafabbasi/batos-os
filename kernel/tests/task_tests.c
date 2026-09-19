@@ -498,6 +498,114 @@ void task_tests_run(void)
     );
 
     /*
+     * BLOCKED and SLEEPING tasks retain execution ownership
+     * outside the runnable queue. Final destruction must wait
+     * until those ownership states are released.
+     */
+    struct task blocked_lifecycle_task = {0};
+    struct task sleeping_lifecycle_task = {0};
+
+    if (task_create(
+            &blocked_lifecycle_task,
+            6,
+            pml4,
+            task_test_entry,
+            NULL
+        ) != 0 ||
+        task_transition(
+            &blocked_lifecycle_task,
+            TASK_STATE_RUNNING
+        ) != 0 ||
+        task_transition(
+            &blocked_lifecycle_task,
+            TASK_STATE_BLOCKED
+        ) != 0)
+    {
+        task_test_fail(
+            "TASK LIFECYCLE BLOCKED SETUP: FAILED\n"
+        );
+    }
+
+    if (task_destroy(&blocked_lifecycle_task) == 0)
+    {
+        task_test_fail(
+            "TASK LIFECYCLE BLOCKED DESTROY: ACCEPTED\n"
+        );
+    }
+
+    if (blocked_lifecycle_task.state !=
+            TASK_STATE_BLOCKED ||
+        blocked_lifecycle_task.kernel_stack_base == 0)
+    {
+        task_test_fail(
+            "TASK LIFECYCLE BLOCKED DESTROY: CORRUPTED\n"
+        );
+    }
+
+    if (task_transition(
+            &blocked_lifecycle_task,
+            TASK_STATE_READY
+        ) != 0 ||
+        task_destroy(&blocked_lifecycle_task) != 0)
+    {
+        task_test_fail(
+            "TASK LIFECYCLE BLOCKED RELEASE: FAILED\n"
+        );
+    }
+
+    if (task_create(
+            &sleeping_lifecycle_task,
+            7,
+            pml4,
+            task_test_entry,
+            NULL
+        ) != 0 ||
+        task_transition(
+            &sleeping_lifecycle_task,
+            TASK_STATE_RUNNING
+        ) != 0 ||
+        task_transition(
+            &sleeping_lifecycle_task,
+            TASK_STATE_SLEEPING
+        ) != 0)
+    {
+        task_test_fail(
+            "TASK LIFECYCLE SLEEPING SETUP: FAILED\n"
+        );
+    }
+
+    if (task_destroy(&sleeping_lifecycle_task) == 0)
+    {
+        task_test_fail(
+            "TASK LIFECYCLE SLEEPING DESTROY: ACCEPTED\n"
+        );
+    }
+
+    if (sleeping_lifecycle_task.state !=
+            TASK_STATE_SLEEPING ||
+        sleeping_lifecycle_task.kernel_stack_base == 0)
+    {
+        task_test_fail(
+            "TASK LIFECYCLE SLEEPING DESTROY: CORRUPTED\n"
+        );
+    }
+
+    if (task_transition(
+            &sleeping_lifecycle_task,
+            TASK_STATE_READY
+        ) != 0 ||
+        task_destroy(&sleeping_lifecycle_task) != 0)
+    {
+        task_test_fail(
+            "TASK LIFECYCLE SLEEPING RELEASE: FAILED\n"
+        );
+    }
+
+    serial_write_string(
+        "TASK LIFECYCLE BLOCKED/SLEEPING OWNERSHIP: VERIFIED\n"
+    );
+
+    /*
      * Real task execution/termination verification.
      *
      * Task A executes its entry, verifies its argument, exits,

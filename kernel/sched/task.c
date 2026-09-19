@@ -452,8 +452,26 @@ int task_destroy(struct task *task)
     if (task == NULL)
         return -1;
 
-    if (task->state == TASK_STATE_RUNNING)
-        return -1;
+    /*
+     * Final destruction is only valid once execution ownership
+     * has ended and the task is no longer in an active lifetime
+     * state. READY is destroyable only after runqueue ownership
+     * is released; TERMINATED is destroyable after execution
+     * ownership has ended.
+     */
+    switch (task->state)
+    {
+        case TASK_STATE_READY:
+        case TASK_STATE_TERMINATED:
+            break;
+
+        case TASK_STATE_NEW:
+        case TASK_STATE_RUNNING:
+        case TASK_STATE_BLOCKED:
+        case TASK_STATE_SLEEPING:
+        default:
+            return -1;
+    }
 
     /*
      * Task-owned resources may only be destroyed after
