@@ -36,6 +36,8 @@ C_SOURCES = \
     kernel/tests/preempt_authority_tests.c \
     kernel/tests/task_registry_tests.c \
     kernel/tests/runqueue_tests.c \
+    kernel/tests/wait_queue_tests.c \
+    kernel/tests/blocking_tests.c \
     kernel/tests/scheduler_tests.c \
     kernel/console/console.c \
     kernel/arch/x86_64/cpu/gdt.c \
@@ -45,6 +47,7 @@ C_SOURCES = \
     kernel/mm/vmm/vmm.c \
     kernel/arch/x86_64/interrupt/pic.c \
     kernel/arch/x86_64/interrupt/irq.c \
+    kernel/arch/x86_64/interrupt/irq_state.c \
     kernel/arch/x86_64/interrupt/irq_routing.c \
     kernel/arch/x86_64/time/pit.c \
     kernel/arch/x86_64/time/time.c \
@@ -54,6 +57,7 @@ C_SOURCES = \
     kernel/mm/heap/heap.c \
     kernel/sched/task.c \
     kernel/sched/task_registry.c \
+    kernel/sched/wait_queue.c \
     kernel/sched/runqueue.c \
     kernel/sched/scheduler.c \
     kernel/arch/x86_64/sched/preempt.c \

@@ -22,6 +22,8 @@
 #include "kernel/tests/preempt_authority_tests.h"
 #include "kernel/tests/task_registry_tests.h"
 #include "kernel/tests/runqueue_tests.h"
+#include "kernel/tests/wait_queue_tests.h"
+#include "kernel/tests/blocking_tests.h"
 #include "kernel/tests/scheduler_tests.h"
 
 /*
@@ -298,6 +300,8 @@ void kernel_main(void)
     preempt_tests_run();
     task_registry_tests_run();
     runqueue_tests_run();
+    wait_queue_tests_run();
+    blocking_tests_run();
     scheduler_tests_run();
 
     preempt_authority_tests_run();

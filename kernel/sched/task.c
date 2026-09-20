@@ -1,10 +1,12 @@
 #include "task.h"
 
 #include "../arch/x86_64/sched/preempt.h"
+#include "../arch/x86_64/interrupt/irq_state.h"
 
 #include "runqueue.h"
 #include "task_registry.h"
 #include "scheduler.h"
+#include "wait_queue.h"
 
 #include "../mm/pmm/pmm.h"
 #include "../mm/vmm/vmm.h"
@@ -320,6 +322,7 @@ int task_create(
 
     task->entry = entry;
     task->argument = argument;
+    task->wait_queue = NULL;
 
     /*
      * The initial task continuation is the established
@@ -448,6 +451,268 @@ int task_exit(struct task *task)
     return 0;
 }
 
+int task_block(
+    struct task *task,
+    struct wait_queue *queue
+)
+{
+    uint64_t irq_flags;
+    struct task *next;
+
+    if (task == NULL ||
+        queue == NULL)
+    {
+        return -1;
+    }
+
+    if (scheduler_get_current() != task)
+        return -2;
+
+    if (task->state != TASK_STATE_RUNNING)
+        return -3;
+
+    if (task->wait_queue != NULL)
+        return -4;
+
+    /*
+     * task_block() is a task-context operation. A successful block
+     * transfers execution through a scheduler-owned handoff which
+     * establishes interrupts enabled in the destination task.
+     *
+     * Therefore callers must enter with maskable interrupts enabled.
+     */
+    if (!x86_64_irq_is_enabled())
+        return -5;
+
+    /*
+     * From this point through scheduler ownership transfer, no
+     * maskable interrupt may observe a partially committed task.
+     */
+    irq_flags = x86_64_irq_save();
+
+    /*
+     * All fallible admission checks are deliberately performed
+     * while the critical section is active. This prevents the
+     * timer IRQ from changing scheduler/task ownership between
+     * validation and commit.
+     */
+    if (!queue->initialized)
+    {
+        x86_64_irq_restore(irq_flags);
+        return -6;
+    }
+
+    if (queue->count >= WAIT_QUEUE_MAX_TASKS)
+    {
+        x86_64_irq_restore(irq_flags);
+        return -7;
+    }
+
+    if (wait_queue_contains(queue, task))
+    {
+        x86_64_irq_restore(irq_flags);
+        return -8;
+    }
+
+    /*
+     * A blocked task cannot remain the only scheduler owner.
+     * Require a replacement READY task before committing the
+     * RUNNING -> BLOCKED transition.
+     */
+    next = scheduler_peek_next();
+
+    if (next == NULL)
+    {
+        x86_64_irq_restore(irq_flags);
+        return -9;
+    }
+
+    if (next->state != TASK_STATE_READY)
+    {
+        x86_64_irq_restore(irq_flags);
+        return -10;
+    }
+
+    /*
+     * Commit lifecycle ownership in the established order:
+     *
+     *   RUNNING
+     *       -> BLOCKED
+     *       -> wait-queue ownership
+     *       -> scheduler ownership transfer
+     *
+     * No maskable interrupt can observe an intermediate state.
+     */
+    if (task_transition(
+            task,
+            TASK_STATE_BLOCKED
+        ) != 0)
+    {
+        x86_64_irq_restore(irq_flags);
+        return -11;
+    }
+
+    if (wait_queue_enqueue(
+            queue,
+            task
+        ) != 0)
+    {
+        /*
+         * Preflight makes this unreachable under the current
+         * single-CPU ownership model. There is no legal direct
+         * BLOCKED -> RUNNING rollback.
+         *
+         * Interrupts remain disabled here because scheduler
+         * ownership has not been transferred.
+         */
+        x86_64_irq_restore(irq_flags);
+        return -12;
+    }
+
+    /*
+     * scheduler_block_current() consumes the READY task and makes
+     * it RUNNING. Its final handoff executes STI immediately before
+     * entering the destination continuation.
+     *
+     * Therefore a successful call never returns here on the first
+     * execution of this task_block() invocation.
+     */
+    if (scheduler_block_current(task) != 0)
+    {
+        /*
+         * This is an internal scheduler invariant violation after
+         * lifecycle/ownership commit. Do not manufacture an illegal
+         * lifecycle rollback.
+         *
+         * Restore the caller's interrupt state before reporting the
+         * invariant failure.
+         */
+        x86_64_irq_restore(irq_flags);
+        return -13;
+    }
+
+    /*
+     * If the blocked task is later scheduled again, execution
+     * resumes from the saved cooperative continuation. Its normal
+     * scheduler handoff establishes IF=1 before this return path.
+     */
+    return 0;
+}
+
+int task_wake(
+    struct task *task
+)
+{
+    uint64_t irq_flags;
+    struct wait_queue *queue;
+
+    if (task == NULL)
+        return -1;
+
+    if (task->state != TASK_STATE_BLOCKED)
+        return -2;
+
+    queue = task->wait_queue;
+
+    if (queue == NULL)
+        return -3;
+
+    /*
+     * Establish an atomic ownership/lifecycle transition.
+     * A timer interrupt must not observe the task after its
+     * blocking ownership has been removed but before it becomes
+     * runnable.
+     */
+    irq_flags = x86_64_irq_save();
+
+    /*
+     * Revalidate all state that can participate in the ownership
+     * transaction while interrupts are disabled.
+     */
+    if (task->state != TASK_STATE_BLOCKED)
+    {
+        x86_64_irq_restore(irq_flags);
+        return -4;
+    }
+
+    queue = task->wait_queue;
+
+    if (queue == NULL)
+    {
+        x86_64_irq_restore(irq_flags);
+        return -5;
+    }
+
+    if (!wait_queue_contains(queue, task))
+    {
+        x86_64_irq_restore(irq_flags);
+        return -6;
+    }
+
+    if (runqueue_count() >= TASK_MAX_TASKS)
+    {
+        x86_64_irq_restore(irq_flags);
+        return -7;
+    }
+
+    if (runqueue_contains(task))
+    {
+        x86_64_irq_restore(irq_flags);
+        return -8;
+    }
+
+    /*
+     * Ownership transition:
+     *
+     *   wait queue ownership -> no blocking ownership
+     */
+    if (wait_queue_remove(queue, task) != 0)
+    {
+        x86_64_irq_restore(irq_flags);
+        return -9;
+    }
+
+    /*
+     * Lifecycle transition:
+     *
+     *   BLOCKED -> READY
+     */
+    if (task_transition(
+            task,
+            TASK_STATE_READY
+        ) != 0)
+    {
+        /*
+         * No illegal READY/BLOCKED rollback is attempted.
+         * The failure indicates an internal lifecycle invariant
+         * violation after ownership was committed.
+         */
+        x86_64_irq_restore(irq_flags);
+        return -10;
+    }
+
+    /*
+     * READY must immediately acquire runqueue ownership.
+     */
+    if (scheduler_add(task) != 0)
+    {
+        /*
+         * Admission was preflighted while interrupts were disabled.
+         * Failure here is therefore an internal ownership invariant
+         * violation; no illegal lifecycle rollback is attempted.
+         */
+        x86_64_irq_restore(irq_flags);
+        return -11;
+    }
+
+    /*
+     * Restore exactly the interrupt state that existed on entry.
+     */
+    x86_64_irq_restore(irq_flags);
+
+    return 0;
+}
+
 int task_destroy(struct task *task)
 {
     if (task == NULL)
@@ -490,6 +755,13 @@ int task_destroy(struct task *task)
     }
 
     /*
+     * A BLOCKED task has explicit wait-queue ownership and must
+     * remain alive until that ownership is released.
+     */
+    if (task->wait_queue != NULL)
+        return -1;
+
+    /*
      * Task-owned resources may only be destroyed after
      * scheduler and registry ownership have been released.
      */
@@ -520,6 +792,7 @@ int task_destroy(struct task *task)
 
     task->entry = NULL;
     task->argument = NULL;
+    task->wait_queue = NULL;
 
     /*
      * The saved interrupt-return frame lived on the task's

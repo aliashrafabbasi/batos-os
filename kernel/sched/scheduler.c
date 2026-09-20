@@ -181,6 +181,68 @@ int scheduler_yield(void)
     return 0;
 }
 
+int scheduler_block_current(
+    struct task *task
+)
+{
+    struct task *current = scheduler_current;
+    struct task *next;
+
+    if (task == NULL ||
+        task != current)
+    {
+        return -1;
+    }
+
+    if (current->state != TASK_STATE_BLOCKED)
+    {
+        return -2;
+    }
+
+    /*
+     * The caller must establish blocking ownership only after
+     * confirming that another READY task exists. Keep the current
+     * scheduler owner unchanged until the replacement task has
+     * been successfully admitted as RUNNING.
+     */
+    next = scheduler_peek_next();
+
+    if (next == NULL)
+    {
+        return -3;
+    }
+
+    if (next->state != TASK_STATE_READY)
+    {
+        return -4;
+    }
+
+    next = scheduler_take_next();
+
+    if (next == NULL)
+    {
+        return -5;
+    }
+
+    if (task_transition(next, TASK_STATE_RUNNING) != 0)
+    {
+        if (runqueue_enqueue(next) != 0)
+            return -6;
+
+        return -6;
+    }
+
+    scheduler_current = next;
+    scheduler_dispatch_count++;
+
+    x86_64_context_switch_and_enable_interrupts(
+        &current->context,
+        &next->context
+    );
+
+    return 0;
+}
+
 int scheduler_preempt_current(
     struct task *expected,
     struct task **next

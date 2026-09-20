@@ -42,6 +42,7 @@ enum task_resume_authority
 };
 
 struct task;
+struct wait_queue;
 
 typedef void (*task_entry_t)(void *argument);
 typedef int (*task_exit_handler_t)(struct task *task);
@@ -70,6 +71,15 @@ struct task
 
     task_entry_t entry;
     void *argument;
+
+    /*
+     * Explicit ownership of a BLOCKED task.
+     *
+     * NULL means the task is not owned by a wait queue.
+     * A non-NULL value is the exact wait queue that owns
+     * the task while it is BLOCKED.
+     */
+    struct wait_queue *wait_queue;
 
     /*
      * Identifies which architecture-owned continuation is
@@ -106,6 +116,15 @@ int task_set_exit_handler(
 );
 
 int task_exit(
+    struct task *task
+);
+
+int task_block(
+    struct task *task,
+    struct wait_queue *queue
+);
+
+int task_wake(
     struct task *task
 );
 
