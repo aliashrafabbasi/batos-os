@@ -73,6 +73,26 @@ static void preempt_authority_cleanup(
         }
     }
 
+    /*
+     * Scheduler ownership and architecture continuation ownership
+     * are separate lifecycle resources. The test has deliberately
+     * installed interrupt authority on these tasks, so cleanup must
+     * explicitly release that authority before final destruction.
+     */
+    if (task_a != NULL)
+    {
+        task_a->resume_authority = TASK_RESUME_NONE;
+        task_a->preempt_state.valid = 0;
+        task_a->preempt_state.frame_address = 0;
+    }
+
+    if (task_b != NULL)
+    {
+        task_b->resume_authority = TASK_RESUME_NONE;
+        task_b->preempt_state.valid = 0;
+        task_b->preempt_state.frame_address = 0;
+    }
+
     if (task_a != NULL &&
         task_a->state != TASK_STATE_TERMINATED)
     {

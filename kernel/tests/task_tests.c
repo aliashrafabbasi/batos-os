@@ -27,6 +27,10 @@ static uint64_t task_execution_expected_argument =
 static void task_execution_test_a(void *argument);
 static void task_execution_test_b(void *argument);
 
+static volatile uint64_t task_execution_destroy_rejected = 0;
+
+static int task_execution_exit_handler(struct task *task);
+
 extern void x86_64_task_bootstrap_trampoline(void);
 
 static void task_test_entry(void *argument)
@@ -606,6 +610,70 @@ void task_tests_run(void)
     );
 
     /*
+     * An architecture-owned interrupt continuation must block
+     * final destruction until that continuation authority is
+     * explicitly released.
+     */
+    struct task interrupt_lifecycle_task = {0};
+
+    if (task_create(
+            &interrupt_lifecycle_task,
+            8,
+            pml4,
+            task_test_entry,
+            NULL
+        ) != 0)
+    {
+        task_test_fail(
+            "TASK LIFECYCLE INTERRUPT CREATE: FAILED\n"
+        );
+    }
+
+    uint64_t interrupt_stack_base =
+        interrupt_lifecycle_task.kernel_stack_base;
+
+    uint64_t interrupt_stack_top =
+        interrupt_lifecycle_task.kernel_stack_top;
+
+    interrupt_lifecycle_task.resume_authority =
+        TASK_RESUME_INTERRUPT;
+
+    if (task_destroy(&interrupt_lifecycle_task) == 0)
+    {
+        task_test_fail(
+            "TASK LIFECYCLE INTERRUPT DESTROY: ACCEPTED\n"
+        );
+    }
+
+    if (interrupt_lifecycle_task.state !=
+            TASK_STATE_READY ||
+        interrupt_lifecycle_task.kernel_stack_base !=
+            interrupt_stack_base ||
+        interrupt_lifecycle_task.kernel_stack_top !=
+            interrupt_stack_top ||
+        interrupt_lifecycle_task.resume_authority !=
+            TASK_RESUME_INTERRUPT)
+    {
+        task_test_fail(
+            "TASK LIFECYCLE INTERRUPT DESTROY: CORRUPTED\n"
+        );
+    }
+
+    interrupt_lifecycle_task.resume_authority =
+        TASK_RESUME_CONTEXT;
+
+    if (task_destroy(&interrupt_lifecycle_task) != 0)
+    {
+        task_test_fail(
+            "TASK LIFECYCLE INTERRUPT RELEASE: FAILED\n"
+        );
+    }
+
+    serial_write_string(
+        "TASK LIFECYCLE INTERRUPT AUTHORITY: VERIFIED\n"
+    );
+
+    /*
      * Real task execution/termination verification.
      *
      * Task A executes its entry, verifies its argument, exits,
@@ -643,14 +711,38 @@ void task_tests_run(void)
         );
     }
 
+    if (task_set_exit_handler(
+            task_execution_exit_handler
+        ) != 0)
+    {
+        task_test_fail(
+            "TASK EXIT HANDLER INSTALL: FAILED\n"
+        );
+    }
+
     x86_64_context_switch(
         &task_execution_harness_context,
         &task_execution_a.context
     );
 
+    /*
+     * Task B transferred control back to the harness.
+     * Restore the normal scheduler exit handler before
+     * the test performs further lifecycle operations.
+     */
+    if (task_set_exit_handler(
+            scheduler_exit_current
+        ) != 0)
+    {
+        task_test_fail(
+            "TASK EXIT HANDLER RESTORE: FAILED\n"
+        );
+    }
+
     if (task_execution_a_reached != 1 ||
         task_execution_b_reached != 1 ||
-        task_execution_a_terminated != 1)
+        task_execution_a_terminated != 1 ||
+        task_execution_destroy_rejected != 1)
     {
         task_test_fail(
             "TASK EXECUTION: FAILED\n"
@@ -709,6 +801,31 @@ void task_tests_run(void)
     );
 }
 
+static int task_execution_exit_handler(struct task *task)
+{
+    if (task == NULL)
+        return -1;
+
+    /*
+     * task_exit() has already transitioned the task to TERMINATED
+     * and invalidated its continuation authority. The scheduler
+     * still owns the task as current until this handler performs
+     * the dispatch.
+     */
+    if (task_destroy(task) != 0)
+    {
+        task_execution_destroy_rejected = 1;
+    }
+    else
+    {
+        task_test_fail(
+            "TASK CURRENT TERMINATED DESTROY: ACCEPTED\n"
+        );
+    }
+
+    return scheduler_exit_current(task);
+}
+
 static void task_execution_test_a(void *argument)
 {
     task_execution_a_reached = 1;
@@ -760,7 +877,8 @@ static void task_execution_test_b(void *argument)
         &task_execution_harness_context
     );
 
-    task_test_fail(
-        "TASK EXECUTION HARNESS RETURN: FAILED\n"
-    );
+    /*
+     * The context switch above transfers control to the harness.
+     * Execution must never return here during this test.
+     */
 }

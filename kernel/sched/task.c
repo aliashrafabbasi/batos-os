@@ -4,6 +4,7 @@
 
 #include "runqueue.h"
 #include "task_registry.h"
+#include "scheduler.h"
 
 #include "../mm/pmm/pmm.h"
 #include "../mm/vmm/vmm.h"
@@ -450,6 +451,21 @@ int task_exit(struct task *task)
 int task_destroy(struct task *task)
 {
     if (task == NULL)
+        return -1;
+
+    /*
+     * A task cannot be destroyed while the scheduler still owns
+     * it as the current task. This also protects the transient
+     * RUNNING -> TERMINATED -> dispatch window during task exit.
+     */
+    if (scheduler_get_current() == task)
+        return -1;
+
+    /*
+     * An interrupt continuation is architecture-owned execution
+     * state and must be released before task resources are freed.
+     */
+    if (task->resume_authority == TASK_RESUME_INTERRUPT)
         return -1;
 
     /*
