@@ -570,6 +570,13 @@ int task_block(
     }
 
     /*
+     * The blocked task will later resume through the cooperative
+     * context saved by scheduler_block_current(). Any older
+     * interrupt continuation is therefore no longer authoritative.
+     */
+    task->resume_authority = TASK_RESUME_CONTEXT;
+
+    /*
      * scheduler_block_current() consumes the READY task and makes
      * it RUNNING. Its final handoff executes STI immediately before
      * entering the destination continuation.

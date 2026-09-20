@@ -85,6 +85,14 @@ static void blocking_task_a_entry(void *argument)
 
     blocking_a_entered = 1;
 
+    /*
+     * Regression: a task may arrive at a cooperative blocking
+     * boundary while an older interrupt continuation is still
+     * present. task_block() must make the cooperative context
+     * authoritative before handing execution to the scheduler.
+     */
+    blocking_task_a.resume_authority = TASK_RESUME_INTERRUPT;
+
     blocking_a_result =
         task_block(&blocking_task_a, &blocking_queue);
 
@@ -92,6 +100,9 @@ static void blocking_task_a_entry(void *argument)
 
     if (blocking_a_result != 0)
         blocking_test_fail("task_block did not resume successfully");
+
+    if (blocking_task_a.resume_authority != TASK_RESUME_CONTEXT)
+        blocking_test_fail("blocking handoff did not establish context authority");
 
     if (scheduler_get_current() != &blocking_task_a)
         blocking_test_fail("A did not become current after wake");
