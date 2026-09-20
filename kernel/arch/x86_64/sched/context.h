@@ -37,6 +37,18 @@ void x86_64_context_switch(
     const struct x86_64_context *next
 );
 
+/*
+ * Scheduler-owned cooperative handoff.
+ *
+ * Unlike the generic context switch, this boundary establishes
+ * the destination task's normal interrupt-enabled execution
+ * state before entering its continuation.
+ */
+void x86_64_context_switch_and_enable_interrupts(
+    struct x86_64_context *current,
+    const struct x86_64_context *next
+);
+
 void x86_64_context_save(
     struct x86_64_context *current
 );
