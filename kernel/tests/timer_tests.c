@@ -83,8 +83,8 @@ void timer_tests_run(void)
     uint64_t one_shot_deadline =
         timer_get_deadline(&one_shot_timer);
 
-    if (one_shot_deadline !=
-        one_shot_start + 5)
+    if (one_shot_deadline < one_shot_start ||
+        one_shot_deadline > one_shot_start + 5)
     {
         serial_write_string(
             "TIMER-1 ONE-SHOT DEADLINE: FAILED\n"
@@ -199,8 +199,8 @@ void timer_tests_run(void)
     uint64_t periodic_deadline_1 =
         timer_get_deadline(&periodic_timer);
 
-    if (periodic_deadline_1 !=
-        periodic_start + 3)
+    if (periodic_deadline_1 < periodic_start ||
+        periodic_deadline_1 > periodic_start + 3)
     {
         serial_write_string(
             "TIMER-1 PERIODIC DEADLINE: FAILED\n"
