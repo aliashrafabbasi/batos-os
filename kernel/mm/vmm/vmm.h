@@ -32,6 +32,30 @@ void vmm_init(void);
 uint64_t vmm_create_address_space(void);
 
 /*
+ * Create a registered address space containing
+ * BATOS's supervisor-only kernel image mappings.
+ *
+ * Returns:
+ *     Physical address of the new PML4.
+ *     0 on failure.
+ */
+uint64_t vmm_create_kernel_address_space(void);
+
+/*
+ * Destroy a registered, inactive address space.
+ *
+ * The VMM-owned page-table hierarchy is reclaimed.
+ * Mapped physical frames are never freed by this operation.
+ *
+ * Returns:
+ *      0  = destroyed successfully
+ *     -1  = failure
+ */
+int vmm_destroy_address_space(
+    uint64_t pml4_physical
+);
+
+/*
  * Map one 4 KiB virtual page to one physical frame.
  *
  * Returns:
@@ -79,6 +103,24 @@ int vmm_translate(
     uint64_t pml4_physical,
     uint64_t virtual_address,
     uint64_t *physical_address
+);
+
+/*
+ * Inspect one mapped 4 KiB page.
+ *
+ * Returns the physical frame base and final PTE
+ * permission/presence flags without modifying the
+ * address space or CPU CR3.
+ *
+ * Returns:
+ *      0  = mapping inspected successfully
+ *     -1  = invalid or unmapped address
+ */
+int vmm_inspect_mapping(
+    uint64_t pml4_physical,
+    uint64_t virtual_address,
+    uint64_t *physical_address,
+    uint64_t *flags
 );
 
 /*
@@ -144,9 +186,11 @@ int vmm_inspect_address_space(
  *
  *     PML4 → PDPT → PD → PT → PTE
  *
- * and confirms that page-table pages are independently
- * allocated while the final physical mapping and flags
- * are preserved.
+ * Normal mappings require independent page-table pages and
+ * identical final physical mapping and flags.
+ *
+ * Huge PDPT/PD mappings are terminal leaves and must be
+ * preserved identically in the clone.
  *
  * Returns:
  *      0  = verified

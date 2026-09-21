@@ -32,6 +32,83 @@ static volatile struct limine_executable_address_request
     };
 
 /* ============================================================
+   KERNEL IMAGE METADATA
+   ============================================================ */
+
+extern char __kernel_end[];
+
+extern char __kernel_text_start[];
+extern char __kernel_text_end[];
+
+extern char __kernel_rodata_start[];
+extern char __kernel_rodata_end[];
+
+extern char __kernel_data_start[];
+extern char __kernel_data_end[];
+
+extern char __kernel_bss_start[];
+extern char __kernel_bss_end[];
+
+static uint64_t kernel_physical_base = 0;
+static uint64_t kernel_virtual_base = 0;
+static uint64_t kernel_image_size = 0;
+
+uint64_t boot_get_kernel_physical_base(void)
+{
+    return kernel_physical_base;
+}
+
+uint64_t boot_get_kernel_virtual_base(void)
+{
+    return kernel_virtual_base;
+}
+
+uint64_t boot_get_kernel_image_size(void)
+{
+    return kernel_image_size;
+}
+
+uint64_t boot_get_kernel_text_start(void)
+{
+    return (uint64_t)(uintptr_t)__kernel_text_start;
+}
+
+uint64_t boot_get_kernel_text_end(void)
+{
+    return (uint64_t)(uintptr_t)__kernel_text_end;
+}
+
+uint64_t boot_get_kernel_rodata_start(void)
+{
+    return (uint64_t)(uintptr_t)__kernel_rodata_start;
+}
+
+uint64_t boot_get_kernel_rodata_end(void)
+{
+    return (uint64_t)(uintptr_t)__kernel_rodata_end;
+}
+
+uint64_t boot_get_kernel_data_start(void)
+{
+    return (uint64_t)(uintptr_t)__kernel_data_start;
+}
+
+uint64_t boot_get_kernel_data_end(void)
+{
+    return (uint64_t)(uintptr_t)__kernel_data_end;
+}
+
+uint64_t boot_get_kernel_bss_start(void)
+{
+    return (uint64_t)(uintptr_t)__kernel_bss_start;
+}
+
+uint64_t boot_get_kernel_bss_end(void)
+{
+    return (uint64_t)(uintptr_t)__kernel_bss_end;
+}
+
+/* ============================================================
    BOOT INITIALIZATION
    ============================================================ */
 
@@ -58,6 +135,26 @@ void boot_init(void)
 
         uint64_t executable_virtual =
             limine_executable_address_request.response->virtual_base;
+
+        kernel_physical_base =
+            executable_physical;
+
+        kernel_virtual_base =
+            executable_virtual;
+
+        if ((uint64_t)(uintptr_t)__kernel_end <
+            kernel_virtual_base)
+        {
+            kernel_physical_base = 0;
+            kernel_virtual_base = 0;
+            kernel_image_size = 0;
+        }
+        else
+        {
+            kernel_image_size =
+                (uint64_t)(uintptr_t)__kernel_end -
+                kernel_virtual_base;
+        }
 
         serial_write_string(
             "EXECUTABLE PHYSICAL BASE: "

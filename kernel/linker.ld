@@ -27,8 +27,10 @@ SECTIONS
      */
     .text : ALIGN(4K)
     {
+        __kernel_text_start = .;
         KEEP(*(.text.boot))
         *(.text .text.*)
+        __kernel_text_end = .;
     }
 
     /*
@@ -36,7 +38,9 @@ SECTIONS
      */
     .rodata : ALIGN(4K)
     {
+        __kernel_rodata_start = .;
         *(.rodata .rodata.*)
+        __kernel_rodata_end = .;
     }
 
     /*
@@ -44,7 +48,9 @@ SECTIONS
      */
     .data : ALIGN(4K)
     {
+        __kernel_data_start = .;
         *(.data .data.*)
+        __kernel_data_end = .;
     }
 
     /*
@@ -52,8 +58,10 @@ SECTIONS
      */
     .bss : ALIGN(4K)
     {
+        __kernel_bss_start = .;
         *(COMMON)
         *(.bss .bss.*)
+        __kernel_bss_end = .;
     }
 
     /*

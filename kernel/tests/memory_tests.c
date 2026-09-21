@@ -1,5 +1,6 @@
 #include <stdint.h>
 
+#include "kernel/boot/boot.h"
 #include "kernel/console/console.h"
 #include "kernel/mm/pmm/pmm.h"
 #include "kernel/mm/vmm/vmm.h"
@@ -1970,6 +1971,720 @@ void memory_tests_run(void)
 
     serial_write_string(
         "BATOS HARDWARE ADDRESS TRANSLATION: OK\n"
+    );
+
+
+    /* --------------------------------------------------------
+       VMM-3.2D ADDRESS-SPACE OWNERSHIP NEGATIVE CONTRACT TEST
+       -------------------------------------------------------- */
+
+    serial_write_string(
+        "\nVMM-3.2D ADDRESS-SPACE OWNERSHIP NEGATIVE CONTRACT TEST\n"
+    );
+
+    /*
+     * Invalid root 0 must never be accepted by the VMM.
+     */
+    if (vmm_verify_page_table_root(0) == 0)
+    {
+        serial_write_string(
+            "VMM-3.2D: ZERO ROOT ACCEPTED\n"
+        );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    uint64_t ownership_test_physical = 0;
+    uint64_t ownership_test_flags = 0;
+
+    if (vmm_translate(
+            0,
+            0x0000000040000000ULL,
+            &ownership_test_physical
+        ) == 0)
+    {
+        serial_write_string(
+            "VMM-3.2D: ZERO ROOT TRANSLATED\n"
+        );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    if (vmm_inspect_mapping(
+            0,
+            0x0000000040000000ULL,
+            &ownership_test_physical,
+            &ownership_test_flags
+        ) == 0)
+    {
+        serial_write_string(
+            "VMM-3.2D: ZERO ROOT INSPECTED\n"
+        );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    serial_write_string(
+        "ZERO ROOT: REJECTED\n"
+    );
+
+    /*
+     * Acquire a real physical frame which PMM owns but VMM
+     * has never registered as a page-table frame.
+     *
+     * This gives us a deterministic unregistered-root test
+     * without inventing a magic physical address.
+     */
+    uint64_t unregistered_root =
+        pmm_alloc_frame();
+
+    if (unregistered_root == 0)
+    {
+        serial_write_string(
+            "VMM-3.2D: UNREGISTERED ROOT FRAME ALLOCATION FAILED\n"
+        );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    if (vmm_verify_page_table_root(
+            unregistered_root
+        ) == 0)
+    {
+        pmm_free_frame(unregistered_root);
+
+        serial_write_string(
+            "VMM-3.2D: UNREGISTERED ROOT ACCEPTED\n"
+        );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    if (vmm_translate(
+            unregistered_root,
+            0x0000000040000000ULL,
+            &ownership_test_physical
+        ) == 0)
+    {
+        pmm_free_frame(unregistered_root);
+
+        serial_write_string(
+            "VMM-3.2D: UNREGISTERED ROOT TRANSLATED\n"
+        );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    if (vmm_inspect_mapping(
+            unregistered_root,
+            0x0000000040000000ULL,
+            &ownership_test_physical,
+            &ownership_test_flags
+        ) == 0)
+    {
+        pmm_free_frame(unregistered_root);
+
+        serial_write_string(
+            "VMM-3.2D: UNREGISTERED ROOT INSPECTED\n"
+        );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    pmm_free_frame(unregistered_root);
+
+    serial_write_string(
+        "UNREGISTERED ROOT: REJECTED\n"
+    );
+
+    /*
+     * Create a legitimate second address space.
+     *
+     * The root is empty, but it is fully registered and
+     * therefore must pass the root ownership contract.
+     */
+    uint64_t ownership_test_root =
+        vmm_create_address_space();
+
+    if (ownership_test_root == 0)
+    {
+        serial_write_string(
+            "VMM-3.2D: SECOND ADDRESS-SPACE CREATION FAILED\n"
+        );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    if (vmm_verify_page_table_root(
+            ownership_test_root
+        ) != 0)
+    {
+        vmm_destroy_address_space(
+            ownership_test_root
+        );
+
+        serial_write_string(
+            "VMM-3.2D: LEGITIMATE SECOND ROOT REJECTED\n"
+        );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    serial_write_string(
+        "SECOND ROOT: REGISTERED + OWNED\n"
+    );
+
+    /*
+     * The second address space is intentionally never activated.
+     * Destroying it must therefore succeed.
+     */
+    if (vmm_destroy_address_space(
+            ownership_test_root
+        ) != 0)
+    {
+        serial_write_string(
+            "VMM-3.2D: INACTIVE ROOT DESTROY FAILED\n"
+        );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    /*
+     * Lifecycle metadata may retain the historical address-space
+     * record, but the page-table root ownership record has been
+     * released. Therefore all page-table operations must reject
+     * the destroyed root.
+     */
+    if (vmm_verify_page_table_root(
+            ownership_test_root
+        ) == 0)
+    {
+        serial_write_string(
+            "VMM-3.2D: DESTROYED ROOT OWNERSHIP ACCEPTED\n"
+        );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    if (vmm_translate(
+            ownership_test_root,
+            0x0000000040000000ULL,
+            &ownership_test_physical
+        ) == 0)
+    {
+        serial_write_string(
+            "VMM-3.2D: DESTROYED ROOT TRANSLATED\n"
+        );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    if (vmm_inspect_mapping(
+            ownership_test_root,
+            0x0000000040000000ULL,
+            &ownership_test_physical,
+            &ownership_test_flags
+        ) == 0)
+    {
+        serial_write_string(
+            "VMM-3.2D: DESTROYED ROOT INSPECTED\n"
+        );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    serial_write_string(
+        "DESTROYED ROOT: REJECTED\n"
+    );
+
+    serial_write_string(
+        "VMM-3.2D: ADDRESS-SPACE OWNERSHIP CONTRACT VERIFIED\n"
+    );
+
+
+    serial_write_string(
+        "\nSCHED-3A KERNEL ADDRESS-SPACE TEST\n"
+    );
+
+    /*
+     * The kernel image frames are owned by the boot/runtime
+     * environment, not by the VMM address-space hierarchy.
+     *
+     * Capture the PMM baseline so destroying the test address
+     * space can be proven to reclaim only its page tables.
+     */
+    uint64_t sched3a_free_before =
+        pmm_get_free_frames();
+
+    uint64_t sched3a_kernel_pml4 =
+        vmm_create_kernel_address_space();
+
+    if (sched3a_kernel_pml4 == 0)
+    {
+        serial_write_string(
+            "SCHED-3A: KERNEL ADDRESS-SPACE CREATION FAILED\n"
+        );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    if (vmm_verify_address_space_state(
+            sched3a_kernel_pml4,
+            VMM_ADDRESS_SPACE_CREATED
+        ) != 0)
+    {
+        serial_write_string(
+            "SCHED-3A: INITIAL STATE FAILED\n"
+        );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    serial_write_string(
+        "KERNEL ADDRESS SPACE: CREATED\n"
+    );
+
+    /*
+     * Verify that destroying the currently active BATOS
+     * address space is rejected.
+     */
+    if (vmm_destroy_address_space(
+            pml4
+        ) == 0)
+    {
+        serial_write_string(
+            "SCHED-3A: ACTIVE ADDRESS-SPACE DESTROY WAS ALLOWED\n"
+        );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    serial_write_string(
+        "ACTIVE ADDRESS-SPACE DESTROY: REJECTED\n"
+    );
+
+    uint64_t sched3a_kernel_virtual =
+        boot_get_kernel_virtual_base();
+
+    uint64_t sched3a_text_start =
+        boot_get_kernel_text_start();
+
+    uint64_t sched3a_rodata_start =
+        boot_get_kernel_rodata_start();
+
+    uint64_t sched3a_data_start =
+        boot_get_kernel_data_start();
+
+    uint64_t sched3a_bss_start =
+        boot_get_kernel_bss_start();
+
+    uint64_t sched3a_kernel_physical =
+        boot_get_kernel_physical_base();
+
+    uint64_t sched3a_physical = 0;
+    uint64_t sched3a_flags = 0;
+
+    /*
+     * Verify .text.
+     */
+    if (vmm_inspect_mapping(
+            sched3a_kernel_pml4,
+            sched3a_text_start,
+            &sched3a_physical,
+            &sched3a_flags
+        ) != 0 ||
+        sched3a_physical !=
+            sched3a_kernel_physical +
+            (sched3a_text_start -
+             sched3a_kernel_virtual) ||
+        sched3a_flags != VMM_PRESENT)
+    {
+        serial_write_string(
+            "SCHED-3A: .TEXT MAPPING/PERMISSION FAILED\n"
+        );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    serial_write_string(
+        ".TEXT: RO + SUPERVISOR VERIFIED\n"
+    );
+
+    /*
+     * Verify .rodata.
+     */
+    if (vmm_inspect_mapping(
+            sched3a_kernel_pml4,
+            sched3a_rodata_start,
+            &sched3a_physical,
+            &sched3a_flags
+        ) != 0 ||
+        sched3a_physical !=
+            sched3a_kernel_physical +
+            (sched3a_rodata_start -
+             sched3a_kernel_virtual) ||
+        sched3a_flags != VMM_PRESENT)
+    {
+        serial_write_string(
+            "SCHED-3A: .RODATA MAPPING/PERMISSION FAILED\n"
+        );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    serial_write_string(
+        ".RODATA: RO + SUPERVISOR VERIFIED\n"
+    );
+
+    /*
+     * Verify .data.
+     */
+    if (vmm_inspect_mapping(
+            sched3a_kernel_pml4,
+            sched3a_data_start,
+            &sched3a_physical,
+            &sched3a_flags
+        ) != 0 ||
+        sched3a_physical !=
+            sched3a_kernel_physical +
+            (sched3a_data_start -
+             sched3a_kernel_virtual) ||
+        sched3a_flags !=
+            (VMM_PRESENT | VMM_WRITABLE))
+    {
+        serial_write_string(
+            "SCHED-3A: .DATA MAPPING/PERMISSION FAILED\n"
+        );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    serial_write_string(
+        ".DATA: RW + SUPERVISOR VERIFIED\n"
+    );
+
+    /*
+     * Verify .bss.
+     */
+    if (vmm_inspect_mapping(
+            sched3a_kernel_pml4,
+            sched3a_bss_start,
+            &sched3a_physical,
+            &sched3a_flags
+        ) != 0 ||
+        sched3a_physical !=
+            sched3a_kernel_physical +
+            (sched3a_bss_start -
+             sched3a_kernel_virtual) ||
+        sched3a_flags !=
+            (VMM_PRESENT | VMM_WRITABLE))
+    {
+        serial_write_string(
+            "SCHED-3A: .BSS MAPPING/PERMISSION FAILED\n"
+        );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    serial_write_string(
+        ".BSS: RW + SUPERVISOR VERIFIED\n"
+    );
+
+    /*
+     * Verify that the kernel image mappings never acquire
+     * user access.
+     */
+    if (vmm_inspect_mapping(
+            sched3a_kernel_pml4,
+            sched3a_text_start,
+            &sched3a_physical,
+            &sched3a_flags
+        ) != 0 ||
+        (sched3a_flags & VMM_USER) != 0)
+    {
+        serial_write_string(
+            "SCHED-3A: KERNEL USER ACCESS DETECTED\n"
+        );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    serial_write_string(
+        "KERNEL IMAGE: SUPERVISOR-ONLY VERIFIED\n"
+    );
+
+    /*
+     * Destroy the inactive test address space.
+     */
+    if (vmm_destroy_address_space(
+            sched3a_kernel_pml4
+        ) != 0)
+    {
+        serial_write_string(
+            "SCHED-3A: ADDRESS-SPACE DESTROY FAILED\n"
+        );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    /*
+     * The VMM page-table hierarchy must have been reclaimed.
+     *
+     * The exact frame delta is intentionally not hard-coded:
+     * the test verifies restoration to the PMM baseline instead.
+     *
+     * Kernel image frames were never owned by this address
+     * space and therefore must not be released by destruction.
+     */
+    uint64_t sched3a_free_after =
+        pmm_get_free_frames();
+
+    if (sched3a_free_after !=
+        sched3a_free_before)
+    {
+        serial_write_string(
+            "SCHED-3A: PAGE-TABLE RECLAMATION/FRAME LIFECYCLE FAILED\n"
+        );
+
+        serial_write_string(
+            "CPU HALTED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    serial_write_string(
+        "PAGE-TABLE RECLAMATION: VERIFIED\n"
+    );
+
+    serial_write_string(
+        "SCHED-3A: KERNEL ADDRESS-SPACE FOUNDATION VERIFIED\n"
     );
 
 }
