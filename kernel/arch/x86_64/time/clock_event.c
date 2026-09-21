@@ -1,5 +1,6 @@
 #include "clock_event.h"
 #include "time.h"
+#include "timer_service.h"
 
 static enum clock_event_source clock_event_source =
     CLOCK_EVENT_SOURCE_NONE;
@@ -52,6 +53,8 @@ void clock_event_notify(enum clock_event_source source)
     clock_event_count++;
 
     time_tick();
+
+    timer_service_tick();
 }
 
 enum clock_event_source clock_event_get_source(void)

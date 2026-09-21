@@ -14,6 +14,7 @@
 #include "kernel/tests/interrupt_tests.h"
 #include "kernel/tests/timer_tests.h"
 #include "kernel/tests/timer_bringup_tests.h"
+#include "kernel/tests/timer_service_tests.h"
 #include "kernel/tests/acpi_tests.h"
 #include "kernel/tests/context_tests.h"
 #include "kernel/tests/task_tests.h"
@@ -289,6 +290,15 @@ void kernel_main(void)
     timer_tests_run();
 
     /*
+     * TIMEOUT-1 timer-service initialization.
+     *
+     * The service is initialized during deterministic
+     * bring-up. The test timer itself is armed at the
+     * explicit live-runtime boundary below.
+     */
+    timer_service_tests_run();
+
+    /*
      * Cooperative x86_64 context-switch primitive verification.
      *
      * This validates save/restore of a running context before
@@ -314,7 +324,11 @@ void kernel_main(void)
      * this boundary and therefore observes real hardware
      * interrupt delivery.
      */
+    timer_service_runtime_test_arm();
+
     interrupts_enable_for_runtime();
+
+    timer_service_runtime_test_run();
 
     preempt_runtime_tests_run();
 

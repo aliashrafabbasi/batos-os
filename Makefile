@@ -28,6 +28,7 @@ C_SOURCES = \
     kernel/tests/interrupt_tests.c \
     kernel/tests/timer_tests.c \
     kernel/tests/timer_bringup_tests.c \
+    kernel/tests/timer_service_tests.c \
     kernel/tests/acpi_tests.c \
     kernel/tests/context_tests.c \
     kernel/tests/task_tests.c \
@@ -54,6 +55,7 @@ C_SOURCES = \
     kernel/arch/x86_64/time/clock_event.c \
     kernel/arch/x86_64/time/timer.c \
     kernel/arch/x86_64/time/timer_manager.c \
+    kernel/arch/x86_64/time/timer_service.c \
     kernel/mm/heap/heap.c \
     kernel/sched/task.c \
     kernel/sched/task_registry.c \
