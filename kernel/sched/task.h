@@ -42,6 +42,7 @@ enum task_resume_authority
 };
 
 struct task;
+struct process;
 struct wait_queue;
 
 typedef void (*task_entry_t)(void *argument);
@@ -68,6 +69,14 @@ struct task
      * Address-space lifetime remains owned by VMM.
      */
     uint64_t address_space;
+
+    /*
+     * Process membership back-reference.
+     *
+     * NULL is valid for kernel/infrastructure Tasks that are
+     * not associated with a user Process.
+     */
+    struct process *process;
 
     task_entry_t entry;
     void *argument;

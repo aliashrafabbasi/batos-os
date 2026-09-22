@@ -335,6 +335,13 @@ int task_create(
     task->address_space =
         address_space;
 
+    /*
+     * Process membership is established explicitly through the
+     * Process-owned membership API. task_create() intentionally
+     * does not change its public ABI or implicitly attach a Task.
+     */
+    task->process = NULL;
+
     task->entry = entry;
     task->argument = argument;
     task->wait_queue = NULL;
@@ -784,6 +791,14 @@ int task_destroy(struct task *task)
         return -1;
 
     /*
+     * Process owns Task membership. A Task must be detached by
+     * the Process lifecycle/reaping owner before its resources
+     * can be reclaimed.
+     */
+    if (task->process != NULL)
+        return -1;
+
+    /*
      * Task-owned resources may only be destroyed after
      * scheduler and registry ownership have been released.
      */
@@ -815,6 +830,7 @@ int task_destroy(struct task *task)
     task->entry = NULL;
     task->argument = NULL;
     task->wait_queue = NULL;
+    task->process = NULL;
 
     /*
      * The saved interrupt-return frame lived on the task's

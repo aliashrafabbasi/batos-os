@@ -11,6 +11,20 @@
 
 void timer_tests_run(void)
 {
+    /*
+     * Establish the deterministic portion of TIMER-1 explicitly.
+     *
+     * The live LAPIC clock remains configured and active, but the
+     * exact-deadline assertions below require no clock-event delivery
+     * between the reference timestamp and timer_start().
+     */
+    __asm__ volatile (
+        "cli"
+        :
+        :
+        : "memory"
+    );
+
     serial_write_string(
         "TIMER-1 TEST START\n"
     );
