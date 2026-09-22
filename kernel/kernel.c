@@ -26,6 +26,7 @@
 #include "kernel/tests/wait_queue_tests.h"
 #include "kernel/tests/blocking_tests.h"
 #include "kernel/tests/scheduler_tests.h"
+#include "kernel/tests/process_tests.h"
 
 /*
  * Enter the live interrupt-driven runtime phase.
@@ -313,6 +314,7 @@ void kernel_main(void)
     wait_queue_tests_run();
     blocking_tests_run();
     scheduler_tests_run();
+    process_tests_run();
 
     preempt_authority_tests_run();
 

@@ -40,6 +40,9 @@ C_SOURCES = \
     kernel/tests/wait_queue_tests.c \
     kernel/tests/blocking_tests.c \
     kernel/tests/scheduler_tests.c \
+    kernel/tests/process_tests.c \
+    kernel/process/process.c \
+    kernel/process/process_registry.c \
     kernel/console/console.c \
     kernel/arch/x86_64/cpu/gdt.c \
     kernel/arch/x86_64/interrupt/idt.c \
