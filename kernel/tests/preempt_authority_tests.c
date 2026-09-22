@@ -4,6 +4,7 @@
 #include "../sched/scheduler.h"
 #include "../sched/runqueue.h"
 #include "../arch/x86_64/sched/preempt.h"
+#include "../arch/x86_64/sched/dispatch.h"
 #include "../arch/x86_64/interrupt/irq.h"
 #include "../mm/vmm/vmm.h"
 #include "../console/console.h"
@@ -524,6 +525,155 @@ static void preempt_authority_test_context_candidate(void)
     );
 }
 
+
+static void preempt_authority_test_resolver_contract(void)
+{
+    struct task task = {0};
+    struct irq_frame frame = {0};
+    struct x86_64_resume_target target = {0};
+
+    /*
+     * Resolver inputs are architecture-layer contracts. Invalid
+     * pointers must be rejected without producing a transfer target.
+     */
+    if (x86_64_scheduler_resolve_target(
+            NULL,
+            &target
+        ) == 0)
+    {
+        preempt_authority_test_fail(
+            "PREEMPTION-3 RESOLVER NULL TASK: FAILED\n"
+        );
+    }
+
+    if (x86_64_scheduler_resolve_target(
+            &task,
+            NULL
+        ) == 0)
+    {
+        preempt_authority_test_fail(
+            "PREEMPTION-3 RESOLVER NULL TARGET: FAILED\n"
+        );
+    }
+
+    /*
+     * NONE authority is not resumable.
+     */
+    task.resume_authority = TASK_RESUME_NONE;
+    target.kind = X86_64_RESUME_CONTEXT;
+    target.context = &task.context;
+
+    if (x86_64_scheduler_resolve_target(
+            &task,
+            &target
+        ) == 0 ||
+        target.kind != X86_64_RESUME_NONE ||
+        target.context != NULL)
+    {
+        preempt_authority_test_fail(
+            "PREEMPTION-3 RESOLVER NONE: FAILED\n"
+        );
+    }
+
+    /*
+     * INTERRUPT authority without a valid architecture-owned frame
+     * must be rejected.
+     */
+    task.resume_authority = TASK_RESUME_INTERRUPT;
+    task.preempt_state.frame_address = 0;
+    task.preempt_state.valid = 0;
+
+    if (x86_64_scheduler_resolve_target(
+            &task,
+            &target
+        ) == 0 ||
+        target.kind != X86_64_RESUME_NONE ||
+        target.frame != NULL)
+    {
+        preempt_authority_test_fail(
+            "PREEMPTION-3 RESOLVER INVALID INTERRUPT: FAILED\n"
+        );
+    }
+
+    /*
+     * CONTEXT authority must resolve exclusively to the task's
+     * cooperative continuation, even when an interrupt frame is
+     * simultaneously staged.
+     */
+    task.resume_authority = TASK_RESUME_CONTEXT;
+    task.preempt_state.frame_address =
+        (uintptr_t)&frame;
+    task.preempt_state.valid = 1;
+
+    enum task_state state_before = task.state;
+    enum task_resume_authority authority_before =
+        task.resume_authority;
+    uintptr_t frame_address_before =
+        task.preempt_state.frame_address;
+    uint64_t frame_valid_before =
+        task.preempt_state.valid;
+
+    if (x86_64_scheduler_resolve_target(
+            &task,
+            &target
+        ) != 0 ||
+        target.kind != X86_64_RESUME_CONTEXT ||
+        target.context != &task.context)
+    {
+        preempt_authority_test_fail(
+            "PREEMPTION-3 RESOLVER CONTEXT: FAILED\n"
+        );
+    }
+
+    /*
+     * Resolver purity: no generic scheduler/task ownership state
+     * may change during architecture target resolution.
+     */
+    if (task.state != state_before ||
+        task.resume_authority != authority_before ||
+        task.preempt_state.frame_address !=
+            frame_address_before ||
+        task.preempt_state.valid != frame_valid_before)
+    {
+        preempt_authority_test_fail(
+            "PREEMPTION-3 RESOLVER CONTEXT PURITY: FAILED\n"
+        );
+    }
+
+    /*
+     * INTERRUPT authority must resolve to the architecture-owned
+     * interrupt-return frame.
+     */
+    task.resume_authority = TASK_RESUME_INTERRUPT;
+
+    if (x86_64_scheduler_resolve_target(
+            &task,
+            &target
+        ) != 0 ||
+        target.kind != X86_64_RESUME_INTERRUPT ||
+        target.frame != &frame)
+    {
+        preempt_authority_test_fail(
+            "PREEMPTION-3 RESOLVER INTERRUPT: FAILED\n"
+        );
+    }
+
+    if (task.state != state_before ||
+        task.resume_authority != TASK_RESUME_INTERRUPT ||
+        task.preempt_state.frame_address !=
+            frame_address_before ||
+        task.preempt_state.valid != frame_valid_before)
+    {
+        preempt_authority_test_fail(
+            "PREEMPTION-3 RESOLVER INTERRUPT PURITY: FAILED\n"
+        );
+    }
+
+    serial_write_string(
+        "PREEMPTION-3 RESOLVER CONTRACT: VERIFIED\n"
+    );
+}
+
 void preempt_authority_tests_run(void)
 {
     serial_write_string(
@@ -540,6 +690,7 @@ void preempt_authority_tests_run(void)
     preempt_authority_test_no_candidate();
     preempt_authority_test_invalid_candidate();
     preempt_authority_test_context_candidate();
+    preempt_authority_test_resolver_contract();
 
     x86_64_preempt_disable();
 

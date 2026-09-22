@@ -4,6 +4,8 @@
 
 #include "runqueue.h"
 #include "../arch/x86_64/sched/context.h"
+#include "../arch/x86_64/sched/dispatch.h"
+#include "../arch/x86_64/interrupt/irq_state.h"
 
 static struct task *scheduler_current = NULL;
 static uint64_t scheduler_dispatch_count = 0;
@@ -94,6 +96,8 @@ int scheduler_yield(void)
 {
     struct task *current = scheduler_current;
     struct task *next;
+    struct x86_64_resume_target target;
+    uint64_t irq_flags;
 
     if (current == NULL)
     {
@@ -105,39 +109,58 @@ int scheduler_yield(void)
         return -2;
     }
 
+    /*
+     * Scheduler ownership transfer is a single-CPU critical
+     * transaction. Mask maskable interrupts before inspecting
+     * and committing the READY candidate so a timer interrupt
+     * cannot invalidate the preflighted destination.
+     */
+    irq_flags = x86_64_irq_save();
+
+    /*
+     * Preflight the destination before changing current ownership.
+     * The architecture layer validates continuation authority;
+     * the generic scheduler only carries the resolved target.
+     */
+    next = scheduler_peek_next();
+
+    if (next == NULL)
+    {
+        x86_64_irq_restore(irq_flags);
+        return -3;
+    }
+
+    if (next->state != TASK_STATE_READY)
+    {
+        x86_64_irq_restore(irq_flags);
+        return -4;
+    }
+
+    if (x86_64_scheduler_resolve_target(
+            next,
+            &target
+        ) != 0)
+    {
+        x86_64_irq_restore(irq_flags);
+        return -5;
+    }
+
     if (task_transition(current, TASK_STATE_READY) != 0)
     {
-        return -3;
+        x86_64_irq_restore(irq_flags);
+        return -6;
     }
 
     if (runqueue_enqueue(current) != 0)
     {
         if (task_transition(current, TASK_STATE_RUNNING) != 0)
-            return -3;
+        {
+            x86_64_irq_restore(irq_flags);
+            return -6;
+        }
 
-        return -3;
-    }
-
-    next = scheduler_peek_next();
-
-    if (next == NULL)
-    {
-        runqueue_remove(current);
-
-        if (task_transition(current, TASK_STATE_RUNNING) != 0)
-            return -4;
-
-        return -4;
-    }
-
-    if (next->state != TASK_STATE_READY)
-    {
-        runqueue_remove(current);
-
-        if (task_transition(current, TASK_STATE_RUNNING) != 0)
-            return -5;
-
-        return -5;
+        x86_64_irq_restore(irq_flags);
+        return -6;
     }
 
     next = scheduler_take_next();
@@ -147,9 +170,33 @@ int scheduler_yield(void)
         runqueue_remove(current);
 
         if (task_transition(current, TASK_STATE_RUNNING) != 0)
-            return -6;
+        {
+            x86_64_irq_restore(irq_flags);
+            return -7;
+        }
 
-        return -6;
+        x86_64_irq_restore(irq_flags);
+        return -7;
+    }
+
+    /*
+     * The runqueue is the generic ownership authority. The
+     * destination must still be the READY task whose continuation
+     * was preflighted above.
+     */
+    if (next->state != TASK_STATE_READY)
+    {
+        runqueue_enqueue(next);
+        runqueue_remove(current);
+
+        if (task_transition(current, TASK_STATE_RUNNING) != 0)
+        {
+            x86_64_irq_restore(irq_flags);
+            return -8;
+        }
+
+        x86_64_irq_restore(irq_flags);
+        return -8;
     }
 
     if (task_transition(next, TASK_STATE_RUNNING) != 0)
@@ -158,25 +205,48 @@ int scheduler_yield(void)
         runqueue_remove(current);
 
         if (task_transition(current, TASK_STATE_RUNNING) != 0)
-            return -7;
+        {
+            x86_64_irq_restore(irq_flags);
+            return -9;
+        }
 
-        return -7;
+        x86_64_irq_restore(irq_flags);
+        return -9;
     }
 
     scheduler_current = next;
     scheduler_dispatch_count++;
 
     /*
-     * The current task is resuming through its cooperative
-     * saved context. Any older interrupt continuation must
-     * no longer be authoritative.
+     * Ordinary cooperative execution resumes through current's
+     * saved context. Any older interrupt continuation is no longer
+     * authoritative for cooperative dispatch.
      */
     current->resume_authority = TASK_RESUME_CONTEXT;
 
-    x86_64_context_switch(
-        &current->context,
-        &next->context
-    );
+    /*
+     * The dispatch primitive owns the final architecture handoff.
+     *
+     * CONTEXT dispatch enables interrupts immediately before entering
+     * the destination continuation. INTERRUPT dispatch uses the IF
+     * state encoded in its authoritative interrupt frame.
+     *
+     * Therefore the saved irq_flags must NOT be restored on success.
+     */
+    if (x86_64_scheduler_dispatch(
+            current,
+            &target
+        ) != 0)
+    {
+        /*
+         * Returning here means the architecture handoff rejected
+         * an already-preflighted target. This is an internal
+         * scheduler/architecture invariant violation after generic
+         * ownership has already committed.
+         */
+        for (;;)
+            __asm__ volatile ("cli\n\thlt");
+    }
 
     return 0;
 }

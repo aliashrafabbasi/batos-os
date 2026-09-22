@@ -1,4 +1,5 @@
 #include "preempt.h"
+#include "dispatch.h"
 
 #include "context.h"
 #include "../cpu/gdt.h"
@@ -119,42 +120,6 @@ int x86_64_preempt_is_enabled(void)
     return preempt_enabled != 0;
 }
 
-static int x86_64_preempt_resolve_target(
-    struct task *task,
-    struct x86_64_resume_target *target
-)
-{
-    if (task == NULL || target == NULL)
-        return -1;
-
-    target->kind = X86_64_RESUME_NONE;
-    target->context = NULL;
-
-    /*
-     * The generic scheduler records the authoritative continuation
-     * kind. The architecture layer alone resolves that authority
-     * into an architecture-specific transfer target.
-     */
-    if (task->resume_authority == TASK_RESUME_CONTEXT)
-    {
-        target->kind = X86_64_RESUME_CONTEXT;
-        target->context = &task->context;
-        return 0;
-    }
-
-    if (task->resume_authority == TASK_RESUME_INTERRUPT &&
-        x86_64_preempt_state_is_valid(&task->preempt_state))
-    {
-        target->kind = X86_64_RESUME_INTERRUPT;
-        target->frame =
-            (struct irq_frame *)(uintptr_t)
-                task->preempt_state.frame_address;
-        return 0;
-    }
-
-    return -2;
-}
-
 int x86_64_preempt_handle_timer(
     struct irq_frame *frame,
     struct x86_64_resume_target *target
@@ -218,7 +183,7 @@ int x86_64_preempt_handle_timer(
      */
     struct x86_64_resume_target candidate_target;
 
-    if (x86_64_preempt_resolve_target(
+    if (x86_64_scheduler_resolve_target(
             candidate,
             &candidate_target) != 0)
     {

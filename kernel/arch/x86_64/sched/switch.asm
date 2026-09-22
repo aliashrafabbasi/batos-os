@@ -6,6 +6,7 @@ global x86_64_context_switch
 global x86_64_context_switch_and_enable_interrupts
 global x86_64_context_save
 global x86_64_context_restore
+global x86_64_context_switch_to_interrupt
 
 ; void x86_64_context_switch(
 ;     struct x86_64_context *current,
@@ -168,3 +169,68 @@ x86_64_context_restore:
 
     ; Enter the restored context.
     jmp rax
+
+
+; void x86_64_context_switch_to_interrupt(
+;     struct x86_64_context *current,
+;     const struct irq_frame *target
+; );
+;
+; SysV AMD64:
+;   RDI = current cooperative context
+;   RSI = target interrupt-return frame
+;
+; Save the current cooperative continuation exactly like
+; x86_64_context_switch(), then restore the authoritative
+; interrupt-return frame and terminate the handoff with iretq.
+;
+; The target frame contains:
+;   r15..rax
+;   vector
+;   rip
+;   cs
+;   rflags
+;
+; The vector is metadata and is discarded before iretq.
+;
+; This primitive deliberately does not modify the target RFLAGS.
+; Interrupt state therefore comes from the target continuation's
+; authoritative interrupt frame.
+
+x86_64_context_switch_to_interrupt:
+    ; Save current cooperative continuation.
+    mov [rdi + 0],  rbx
+    mov [rdi + 8],  rbp
+    mov [rdi + 16], r12
+    mov [rdi + 24], r13
+    mov [rdi + 32], r14
+    mov [rdi + 40], r15
+    mov [rdi + 48], rsp
+
+    lea rax, [rel .interrupt_resume]
+    mov [rdi + 56], rax
+
+    ; Restore the authoritative interrupt-return frame.
+    mov rsp, rsi
+
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop r11
+    pop r10
+    pop r9
+    pop r8
+    pop rdi
+    pop rsi
+    pop rbp
+    pop rdx
+    pop rcx
+    pop rbx
+    pop rax
+
+    add rsp, 8                  ; discard vector
+    iretq
+
+.interrupt_resume:
+    ret

@@ -49,6 +49,20 @@ void x86_64_context_switch_and_enable_interrupts(
     const struct x86_64_context *next
 );
 
+/*
+ * Scheduler handoff from a cooperative current continuation to
+ * an architecture-owned interrupt-return continuation.
+ *
+ * The current cooperative context is saved before the target
+ * interrupt frame is restored with iretq. The target frame owns
+ * the resulting interrupt state.
+ */
+__attribute__((noreturn))
+void x86_64_context_switch_to_interrupt(
+    struct x86_64_context *current,
+    const void *target_frame
+);
+
 void x86_64_context_save(
     struct x86_64_context *current
 );

@@ -63,6 +63,7 @@ C_SOURCES = \
     kernel/sched/runqueue.c \
     kernel/sched/scheduler.c \
     kernel/arch/x86_64/sched/preempt.c \
+    kernel/arch/x86_64/sched/dispatch.c \
     kernel/arch/x86_64/apic/lapic.c \
     kernel/arch/x86_64/apic/ioapic.c \
     kernel/arch/x86_64/apic/gsi.c \
