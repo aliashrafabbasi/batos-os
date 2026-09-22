@@ -257,6 +257,7 @@ int scheduler_block_current(
 {
     struct task *current = scheduler_current;
     struct task *next;
+    struct x86_64_resume_target target;
 
     if (task == NULL ||
         task != current)
@@ -270,45 +271,65 @@ int scheduler_block_current(
     }
 
     /*
-     * The caller must establish blocking ownership only after
-     * confirming that another READY task exists. Keep the current
-     * scheduler owner unchanged until the replacement task has
-     * been successfully admitted as RUNNING.
+     * Blocking is a terminal ownership transition for the current
+     * execution path. The caller must hold the interrupt-disabled
+     * critical section established by task_block().
+     */
+    if (x86_64_irq_is_enabled())
+    {
+        return -3;
+    }
+
+    /*
+     * Keep scheduler ownership unchanged until the replacement
+     * task has been selected and its architecture continuation
+     * has been resolved successfully.
      */
     next = scheduler_peek_next();
 
     if (next == NULL)
     {
-        return -3;
+        return -4;
     }
 
     if (next->state != TASK_STATE_READY)
     {
-        return -4;
+        return -5;
+    }
+
+    if (x86_64_scheduler_resolve_target(next, &target) != 0)
+    {
+        return -6;
     }
 
     next = scheduler_take_next();
 
     if (next == NULL)
     {
-        return -5;
+        return -7;
     }
 
     if (task_transition(next, TASK_STATE_RUNNING) != 0)
     {
         if (runqueue_enqueue(next) != 0)
-            return -6;
+            return -8;
 
-        return -6;
+        return -8;
     }
 
     scheduler_current = next;
     scheduler_dispatch_count++;
 
-    x86_64_context_switch_and_enable_interrupts(
-        &current->context,
-        &next->context
-    );
+    if (x86_64_scheduler_dispatch(current, &target) != 0)
+    {
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt\n"
+            );
+        }
+    }
 
     return 0;
 }
@@ -434,6 +455,7 @@ int scheduler_exit_current(struct task *task)
 {
     struct task *current = scheduler_current;
     struct task *next;
+    struct x86_64_resume_target target;
 
     if (task == NULL || task != current)
     {
@@ -443,6 +465,17 @@ int scheduler_exit_current(struct task *task)
     if (current->state != TASK_STATE_TERMINATED)
     {
         return -2;
+    }
+
+    /*
+     * A terminated task has no valid continuation of its own.
+     * The terminal handoff therefore executes with interrupts
+     * disabled until architecture dispatch transfers control to
+     * the selected successor.
+     */
+    if (x86_64_irq_is_enabled())
+    {
+        return -3;
     }
 
     next = scheduler_peek_next();
@@ -466,29 +499,42 @@ int scheduler_exit_current(struct task *task)
 
     if (next->state != TASK_STATE_READY)
     {
-        return -3;
+        return -4;
+    }
+
+    if (x86_64_scheduler_resolve_target(next, &target) != 0)
+    {
+        return -5;
     }
 
     next = scheduler_take_next();
 
     if (next == NULL)
     {
-        return -4;
+        return -6;
     }
 
     if (task_transition(next, TASK_STATE_RUNNING) != 0)
     {
-        runqueue_enqueue(next);
-        return -5;
+        if (runqueue_enqueue(next) != 0)
+            return -7;
+
+        return -7;
     }
 
     scheduler_current = next;
     scheduler_dispatch_count++;
 
-    x86_64_context_switch(
-        &current->context,
-        &next->context
-    );
+    if (x86_64_scheduler_dispatch(current, &target) != 0)
+    {
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt\n"
+            );
+        }
+    }
 
     return 0;
 }

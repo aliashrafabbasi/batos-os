@@ -250,8 +250,21 @@ void task_bootstrap_entry(struct task *current)
         current->argument
     );
 
+    /*
+     * Terminal task execution must not expose a window in which
+     * the current task is TERMINATED but its scheduler handoff
+     * has not yet established ownership of a successor.
+     *
+     * The successful terminal dispatch owns the final interrupt
+     * state, so these saved flags are intentionally not restored
+     * after a successful handoff.
+     */
+    uint64_t irq_flags = x86_64_irq_save();
+
     if (task_exit(current) != 0)
     {
+        x86_64_irq_restore(irq_flags);
+
         for (;;)
         {
             __asm__ volatile (
@@ -269,6 +282,8 @@ void task_bootstrap_entry(struct task *current)
     if (task_exit_handler == NULL ||
         task_exit_handler(current) != 0)
     {
+        x86_64_irq_restore(irq_flags);
+
         for (;;)
         {
             __asm__ volatile (

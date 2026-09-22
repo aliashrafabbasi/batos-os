@@ -30,9 +30,11 @@ int scheduler_yield(void);
  * transitioned to BLOCKED and has established its blocking
  * ownership elsewhere.
  *
- * The scheduler selects the next READY task and performs the
- * cooperative context handoff. The scheduler does not own or
- * interpret the blocking object.
+ * The scheduler selects the next READY task, resolves its
+ * architecture continuation, and performs the handoff through
+ * the architecture dispatch boundary. The caller must invoke
+ * this function with maskable interrupts disabled. The scheduler
+ * does not own or interpret the blocking object.
  */
 int scheduler_block_current(
     struct task *task
@@ -59,7 +61,17 @@ int scheduler_preempt_current(
     struct task **next
 );
 
-int scheduler_exit_current(struct task *task);
+/*
+ * Complete the terminal handoff from the current task.
+ *
+ * The current task must already be TERMINATED and maskable
+ * interrupts must be disabled. The scheduler resolves the
+ * successor continuation and delegates the actual handoff to
+ * the architecture dispatch boundary.
+ */
+int scheduler_exit_current(
+    struct task *task
+);
 
 uint64_t scheduler_get_dispatch_count(void);
 
