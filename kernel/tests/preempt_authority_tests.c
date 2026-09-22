@@ -369,6 +369,161 @@ static void preempt_authority_test_invalid_candidate(void)
     );
 }
 
+static void preempt_authority_test_context_candidate(void)
+{
+    struct task task_a = {0};
+    struct task task_b = {0};
+    struct irq_frame frame = {0};
+    struct x86_64_resume_target target = {0};
+
+    uint64_t pml4 = vmm_get_pml4();
+
+    if (pml4 == 0)
+    {
+        preempt_authority_test_fail(
+            "PREEMPTION-3 CONTEXT-CANDIDATE ADDRESS SPACE: FAILED\n"
+        );
+    }
+
+    if (scheduler_init() != 0)
+    {
+        preempt_authority_test_fail(
+            "PREEMPTION-3 CONTEXT-CANDIDATE SCHEDULER: FAILED\n"
+        );
+    }
+
+    if (task_create(
+            &task_a,
+            253,
+            pml4,
+            preempt_authority_test_entry,
+            NULL
+        ) != 0 ||
+        task_create(
+            &task_b,
+            254,
+            pml4,
+            preempt_authority_test_entry,
+            NULL
+        ) != 0)
+    {
+        preempt_authority_test_fail(
+            "PREEMPTION-3 CONTEXT-CANDIDATE TASK CREATE: FAILED\n"
+        );
+    }
+
+    /*
+     * task_create() deliberately stages a usable interrupt-return
+     * frame for first-run support, while CONTEXT remains the
+     * authoritative continuation. The preemption resolver must
+     * therefore select B's cooperative context, not its staged
+     * interrupt frame.
+     */
+    if (task_b.resume_authority != TASK_RESUME_CONTEXT ||
+        task_b.preempt_state.valid == 0 ||
+        task_b.preempt_state.frame_address == 0)
+    {
+        preempt_authority_test_fail(
+            "PREEMPTION-3 CONTEXT-CANDIDATE AUTHORITY SETUP: FAILED\n"
+        );
+    }
+
+    if (scheduler_add(&task_a) != 0 ||
+        scheduler_add(&task_b) != 0 ||
+        scheduler_start() != 0)
+    {
+        preempt_authority_test_fail(
+            "PREEMPTION-3 CONTEXT-CANDIDATE START: FAILED\n"
+        );
+    }
+
+    if (scheduler_get_current() != &task_a ||
+        task_a.state != TASK_STATE_RUNNING ||
+        task_b.state != TASK_STATE_READY ||
+        !runqueue_contains(&task_b) ||
+        runqueue_count() != 1)
+    {
+        preempt_authority_test_fail(
+            "PREEMPTION-3 CONTEXT-CANDIDATE INITIAL STATE: FAILED\n"
+        );
+    }
+
+    uint64_t dispatch_before =
+        scheduler_get_dispatch_count();
+
+    __asm__ volatile ("cli" ::: "memory");
+
+    x86_64_preempt_enable();
+
+    if (x86_64_preempt_handle_timer(
+            &frame,
+            &target
+        ) != 0)
+    {
+        preempt_authority_test_fail(
+            "PREEMPTION-3 CONTEXT-CANDIDATE HANDLER: FAILED\n"
+        );
+    }
+
+    if (scheduler_get_current() != &task_b ||
+        task_a.state != TASK_STATE_READY ||
+        task_b.state != TASK_STATE_RUNNING ||
+        runqueue_contains(&task_a) == 0 ||
+        runqueue_count() != 1)
+    {
+        preempt_authority_test_fail(
+            "PREEMPTION-3 CONTEXT-CANDIDATE OWNERSHIP: FAILED\n"
+        );
+    }
+
+    if (scheduler_get_dispatch_count() !=
+        dispatch_before + 1)
+    {
+        preempt_authority_test_fail(
+            "PREEMPTION-3 CONTEXT-CANDIDATE DISPATCH: FAILED\n"
+        );
+    }
+
+    /*
+     * A's live interrupt frame became authoritative when the timer
+     * interrupted it. B retains CONTEXT authority because its
+     * cooperative continuation was selected for resumption.
+     */
+    if (task_a.resume_authority != TASK_RESUME_INTERRUPT ||
+        task_a.preempt_state.valid == 0 ||
+        task_a.preempt_state.frame_address !=
+            (uintptr_t)&frame)
+    {
+        preempt_authority_test_fail(
+            "PREEMPTION-3 CONTEXT-CANDIDATE CURRENT AUTHORITY: FAILED\n"
+        );
+    }
+
+    if (task_b.resume_authority != TASK_RESUME_CONTEXT)
+    {
+        preempt_authority_test_fail(
+            "PREEMPTION-3 CONTEXT-CANDIDATE TARGET AUTHORITY: FAILED\n"
+        );
+    }
+
+    if (target.kind != X86_64_RESUME_CONTEXT ||
+        target.context != &task_b.context)
+    {
+        preempt_authority_test_fail(
+            "PREEMPTION-3 CONTEXT-CANDIDATE TARGET: FAILED\n"
+        );
+    }
+
+    serial_write_string(
+        "PREEMPTION-3 CONTEXT-CANDIDATE: VERIFIED\n"
+    );
+
+    preempt_authority_cleanup(
+        &task_a,
+        &task_b
+    );
+}
+
 void preempt_authority_tests_run(void)
 {
     serial_write_string(
@@ -384,6 +539,7 @@ void preempt_authority_tests_run(void)
 
     preempt_authority_test_no_candidate();
     preempt_authority_test_invalid_candidate();
+    preempt_authority_test_context_candidate();
 
     x86_64_preempt_disable();
 
