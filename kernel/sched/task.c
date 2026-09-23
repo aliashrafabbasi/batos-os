@@ -144,8 +144,44 @@ static int task_unmap_stack(struct task *task)
         return -1;
     }
 
-    int result = 0;
+    /*
+     * Preflight the complete ownership graph before performing
+     * any destructive operation.
+     *
+     * Either every stack page is mapped to the exact frame owned
+     * by the Task, or the stack remains completely untouched.
+     */
+    for (uint64_t page = 0;
+         page < TASK_KERNEL_STACK_PAGE_COUNT;
+         page++)
+    {
+        uint64_t virtual_address =
+            task->kernel_stack_base +
+            page * VMM_PAGE_SIZE;
 
+        uint64_t physical = 0;
+
+        if (vmm_translate(
+                task->address_space,
+                virtual_address,
+                &physical
+            ) != 0)
+        {
+            return -1;
+        }
+
+        if (physical !=
+            task->kernel_stack_pages[page])
+        {
+            return -1;
+        }
+    }
+
+    /*
+     * The complete stack mapping has now been validated.
+     * Destructive teardown may proceed without an expected
+     * partial-validation failure.
+     */
     for (uint64_t page = 0;
          page < TASK_KERNEL_STACK_PAGE_COUNT;
          page++)
@@ -162,8 +198,13 @@ static int task_unmap_stack(struct task *task)
                 &physical
             ) != 0)
         {
-            result = -1;
-            continue;
+            return -1;
+        }
+
+        if (physical !=
+            task->kernel_stack_pages[page])
+        {
+            return -1;
         }
 
         pmm_free_frame(physical);
@@ -171,7 +212,7 @@ static int task_unmap_stack(struct task *task)
         task->kernel_stack_pages[page] = 0;
     }
 
-    return result;
+    return 0;
 }
 
 static task_exit_handler_t task_exit_handler = NULL;

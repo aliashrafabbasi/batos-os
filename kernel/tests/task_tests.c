@@ -278,6 +278,89 @@ void task_tests_run(void)
         );
     }
 
+    /*
+     * Stack teardown must reject an ownership mismatch before
+     * modifying any mapping or releasing any physical frame.
+     */
+    uint64_t saved_stack_physical =
+        task.kernel_stack_pages[1];
+
+    uint64_t free_before_invalid_destroy =
+        pmm_get_free_frames();
+
+    task.kernel_stack_pages[1] =
+        saved_stack_physical ^ VMM_PAGE_SIZE;
+
+    if (task_destroy(&task) == 0)
+    {
+        task_test_fail(
+            "TASK STACK TEARDOWN: INVALID OWNERSHIP ACCEPTED\n"
+        );
+    }
+
+    if (task.state != TASK_STATE_READY ||
+        task.kernel_stack_base == 0 ||
+        task.kernel_stack_top == 0 ||
+        pmm_get_free_frames() !=
+            free_before_invalid_destroy)
+    {
+        task_test_fail(
+            "TASK STACK TEARDOWN: STATE MUTATED\n"
+        );
+    }
+
+    /*
+     * The failed destroy must leave every mapping untouched.
+     * Page 1 is compared against the original physical frame,
+     * while the other pages must still match their ownership
+     * metadata.
+     */
+    for (uint64_t page = 0;
+         page < TASK_KERNEL_STACK_PAGE_COUNT;
+         page++)
+    {
+        uint64_t translated = 0;
+
+        uint64_t virtual_address =
+            task.kernel_stack_base +
+            page * VMM_PAGE_SIZE;
+
+        if (vmm_translate(
+                pml4,
+                virtual_address,
+                &translated
+            ) != 0)
+        {
+            task_test_fail(
+                "TASK STACK TEARDOWN: MAPPING LOST\n"
+            );
+        }
+
+        if (page == 1)
+        {
+            if (translated != saved_stack_physical)
+            {
+                task_test_fail(
+                    "TASK STACK TEARDOWN: PARTIAL UNMAP\n"
+                );
+            }
+        }
+        else if (translated !=
+                 task.kernel_stack_pages[page])
+        {
+            task_test_fail(
+                "TASK STACK TEARDOWN: OWNERSHIP CHANGED\n"
+            );
+        }
+    }
+
+    task.kernel_stack_pages[1] =
+        saved_stack_physical;
+
+    serial_write_string(
+        "TASK STACK TEARDOWN ATOMICITY: VERIFIED\n"
+    );
+
     if (task_destroy(&task) != 0)
     {
         task_test_fail(
