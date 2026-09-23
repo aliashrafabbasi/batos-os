@@ -43,8 +43,10 @@ C_SOURCES = \
     kernel/tests/process_tests.c \
     kernel/process/process.c \
     kernel/tests/execution_tests.c \
+    kernel/tests/lifecycle_tests.c \
     kernel/process/process_registry.c \
     kernel/execution/execution.c \
+    kernel/lifecycle/lifecycle.c \
     kernel/console/console.c \
     kernel/arch/x86_64/cpu/gdt.c \
     kernel/arch/x86_64/interrupt/idt.c \

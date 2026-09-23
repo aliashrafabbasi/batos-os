@@ -28,6 +28,8 @@
 #include "kernel/tests/scheduler_tests.h"
 #include "kernel/tests/process_tests.h"
 #include "kernel/tests/execution_tests.h"
+#include "kernel/tests/lifecycle_tests.h"
+#include "kernel/lifecycle/lifecycle.h"
 
 /*
  * Enter the live interrupt-driven runtime phase.
@@ -301,6 +303,26 @@ void kernel_main(void)
     timer_service_tests_run();
 
     /*
+     * Lifecycle is a production dependency of task termination.
+     * It must therefore be initialized before any test or runtime
+     * path can execute a Task through task_bootstrap_entry().
+     */
+    if (lifecycle_init() != 0)
+    {
+        serial_write_string(
+            "LIFECYCLE INITIALIZATION: FAILED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    /*
      * Cooperative x86_64 context-switch primitive verification.
      *
      * This validates save/restore of a running context before
@@ -319,6 +341,7 @@ void kernel_main(void)
     execution_tests_run();
 
     preempt_authority_tests_run();
+    lifecycle_tests_run();
 
     /*
      * Explicit transition from deterministic kernel bring-up

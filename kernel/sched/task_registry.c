@@ -85,11 +85,14 @@ int task_registry_unregister(
     if (task_registry[index] != task)
         return -1;
 
-    task_registry[index] = NULL;
-
+    /*
+     * Validate the registry ownership count before mutation.
+     * Every failure path must leave registry state unchanged.
+     */
     if (task_registry_active_count == 0)
         return -1;
 
+    task_registry[index] = NULL;
     task_registry_active_count--;
 
     return 0;

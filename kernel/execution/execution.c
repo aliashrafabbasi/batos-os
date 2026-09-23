@@ -169,5 +169,16 @@ int execution_create_kernel_task(
         return -9;
     }
 
+    /*
+     * All required execution ownership domains are now published:
+     * Process, Task Registry, and Scheduler. Only at this point does
+     * terminal execution acquire the production lifecycle contract.
+     *
+     * Keeping this assignment after scheduler admission guarantees
+     * that every rollback path before this point remains unmanaged.
+     */
+    task->lifecycle_mode =
+        TASK_LIFECYCLE_MANAGED;
+
     return 0;
 }

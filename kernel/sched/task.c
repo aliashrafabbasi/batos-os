@@ -10,6 +10,7 @@
 
 #include "../mm/pmm/pmm.h"
 #include "../mm/vmm/vmm.h"
+#include "../lifecycle/lifecycle.h"
 
 #include <stdint.h>
 #include <stddef.h>
@@ -316,6 +317,31 @@ void task_bootstrap_entry(struct task *current)
     }
 
     /*
+     * Only production-managed execution Tasks participate in the
+     * deferred-reclamation lifecycle. Low-level Task construction
+     * remains independently usable for kernel infrastructure and
+     * deterministic scheduler tests.
+     *
+     * Publication transfers deferred-reclamation responsibility
+     * while the current Task stack is still live. A managed Task
+     * must not continue terminal execution without a reclamation
+     * record.
+     */
+    if (current->lifecycle_mode == TASK_LIFECYCLE_MANAGED)
+    {
+        if (lifecycle_publish_terminated_task(current) != 0)
+        {
+            for (;;)
+            {
+                __asm__ volatile (
+                    "cli\n"
+                    "hlt\n"
+                );
+            }
+        }
+    }
+
+    /*
      * A terminated task must never return through its bootstrap
      * stack. The registered execution owner performs the
      * control-flow handoff to the next runnable task.
@@ -386,6 +412,8 @@ int task_create(
     task->entry = entry;
     task->argument = argument;
     task->wait_queue = NULL;
+    task->lifecycle_mode =
+        TASK_LIFECYCLE_UNMANAGED;
 
     /*
      * The initial task continuation is the established

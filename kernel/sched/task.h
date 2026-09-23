@@ -41,6 +41,21 @@ enum task_resume_authority
     TASK_RESUME_INTERRUPT
 };
 
+/*
+ * Identifies whether this Task has been admitted into the
+ * production-managed execution lifecycle.
+ *
+ * task_create() constructs an executable Task but does not
+ * establish lifecycle ownership. The execution admission path
+ * marks the Task managed only after all required ownership
+ * domains have been published successfully.
+ */
+enum task_lifecycle_mode
+{
+    TASK_LIFECYCLE_UNMANAGED = 0,
+    TASK_LIFECYCLE_MANAGED
+};
+
 struct task;
 struct process;
 struct wait_queue;
@@ -95,6 +110,16 @@ struct task
      * authoritative when this task is resumed.
      */
     enum task_resume_authority resume_authority;
+
+    /*
+     * Explicit production lifecycle-management contract.
+     *
+     * This is intentionally separate from Task Registry membership:
+     * registry ownership is an identity/lifecycle resource, while
+     * this field identifies whether terminal execution must publish
+     * deferred reclamation to the lifecycle subsystem.
+     */
+    enum task_lifecycle_mode lifecycle_mode;
 
     /*
      * Architecture-owned resumable interrupt-return state.
