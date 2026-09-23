@@ -278,8 +278,9 @@ int process_create(
 
     /*
      * The address space must be a currently registered VMM
-     * address space. Process creation only accepts a newly
-     * created address space; activation is an execution concern.
+     * address space. Process creation may associate with either
+     * a newly created address space or an already-active address
+     * space. Process creation never performs CR3 activation.
      */
     if (vmm_get_address_space_state(
             address_space,
@@ -290,13 +291,22 @@ int process_create(
     }
 
     /*
-     * A newly created Process may only associate with a
-     * VMM-created address space in the CREATED state.
-     * Address-space activation is an execution concern and
-     * must not be performed implicitly by Process creation.
+     * CREATED and ACTIVE are both valid association states.
+     *
+     * CREATED:
+     *   The Process references an address space that has not yet
+     *   been activated by VMM.
+     *
+     * ACTIVE:
+     *   The Process references an address space that is already
+     *   active. This is required for kernel execution units whose
+     *   established address space is already the active CR3.
+     *
+     * Process creation remains a logical ownership/association
+     * operation and never activates or switches an address space.
      */
-    if (address_space_state !=
-        VMM_ADDRESS_SPACE_CREATED)
+    if (address_space_state != VMM_ADDRESS_SPACE_CREATED &&
+        address_space_state != VMM_ADDRESS_SPACE_ACTIVE)
     {
         return -5;
     }

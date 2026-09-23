@@ -85,6 +85,79 @@ void process_tests_run(void)
         );
     }
 
+    /*
+     * An already-active VMM address space is also a valid logical
+     * Process association. Process creation must not perform CR3
+     * activation or otherwise alter the VMM lifecycle state.
+     *
+     * VMM-2C has already activated the BATOS kernel address space
+     * before the Process foundation tests execute.
+     */
+    uint64_t active_address_space =
+        vmm_get_pml4();
+
+    if (active_address_space == 0)
+    {
+        process_test_fail(
+            "PROCESS TEST: ACTIVE ADDRESS SPACE INVALID\\n"
+        );
+    }
+
+    if (vmm_get_address_space_state(
+            active_address_space,
+            &address_space_state
+        ) != 0 ||
+        address_space_state != VMM_ADDRESS_SPACE_ACTIVE)
+    {
+        process_test_fail(
+            "PROCESS TEST: ACTIVE ADDRESS SPACE STATE INVALID\\n"
+        );
+    }
+
+    struct process active_process = {0};
+
+    if (process_create(
+            &active_process,
+            2,
+            active_address_space
+        ) != 0)
+    {
+        process_test_fail(
+            "PROCESS CREATE: ACTIVE ADDRESS SPACE FAILED\\n"
+        );
+    }
+
+    if (active_process.state != PROCESS_STATE_ACTIVE ||
+        active_process.address_space != active_address_space ||
+        process_registry_find(2) != &active_process ||
+        process_registry_find_by_address_space(
+            active_address_space
+        ) != &active_process)
+    {
+        process_test_fail(
+            "PROCESS CREATE: ACTIVE ADDRESS SPACE INVALID\\n"
+        );
+    }
+
+    if (process_terminate(&active_process) != 0 ||
+        process_destroy(&active_process) != 0)
+    {
+        process_test_fail(
+            "PROCESS ACTIVE ASSOCIATION CLEANUP: FAILED\\n"
+        );
+    }
+
+    if (vmm_get_address_space_state(
+            active_address_space,
+            &address_space_state
+        ) != 0 ||
+        address_space_state != VMM_ADDRESS_SPACE_ACTIVE)
+    {
+        process_test_fail(
+            "PROCESS ACTIVE ASSOCIATION: VMM OWNERSHIP VIOLATED\\n"
+        );
+    }
+
     struct process process = {0};
 
     if (process_create(

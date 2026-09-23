@@ -15,6 +15,17 @@
 static struct task task_execution_a;
 static struct task task_execution_b;
 
+/*
+ * Test-only cooperative cleanup continuation.
+ *
+ * This continuation is deliberately not created through
+ * task_create(). It exists only to provide a legitimate
+ * scheduler-owned successor so Task B can leave RUNNING
+ * state before the harness destroys it.
+ */
+static struct task task_execution_cleanup_task;
+static uint8_t task_execution_cleanup_stack[4096];
+
 static struct x86_64_context task_execution_harness_context;
 
 static volatile uint64_t task_execution_a_reached = 0;
@@ -26,6 +37,7 @@ static uint64_t task_execution_expected_argument =
 
 static void task_execution_test_a(void *argument);
 static void task_execution_test_b(void *argument);
+static void task_execution_cleanup_entry(void *argument);
 
 static volatile uint64_t task_execution_destroy_rejected = 0;
 
@@ -768,6 +780,27 @@ void task_tests_run(void)
         );
     }
 
+    /*
+     * The primary execution contract has now been observed:
+     *
+     *   A = TERMINATED
+     *   B = RUNNING
+     *   scheduler_current = B
+     *
+     * Re-enter B's saved cooperative continuation so B can perform
+     * the scheduler-owned transition out of RUNNING state.
+     */
+    x86_64_context_switch(
+        &task_execution_harness_context,
+        &task_execution_b.context
+    );
+
+    /*
+     * Control returns here only from the test-only cleanup
+     * continuation after B has become READY and cleanup has become
+     * the scheduler's current task.
+     */
+
     if (task_destroy(&task_execution_a) != 0)
     {
         task_test_fail(
@@ -776,10 +809,44 @@ void task_tests_run(void)
     }
 
     /*
-     * B is the currently running task. Do not destroy it here.
-     * Its stack remains valid until a later non-running cleanup
-     * path exists.
+     * Task B yielded to the test-only cleanup continuation and is
+     * now READY and owned by the runqueue. Its real VMM-backed
+     * stack can therefore be reclaimed through task_destroy().
      */
+    if (task_execution_b.state != TASK_STATE_READY ||
+        !runqueue_contains(&task_execution_b) ||
+        scheduler_get_current() !=
+            &task_execution_cleanup_task)
+    {
+        task_test_fail(
+            "TASK EXECUTION CLEANUP HANDOFF: FAILED\n"
+        );
+    }
+
+    if (runqueue_remove(&task_execution_b) != 0)
+    {
+        task_test_fail(
+            "TASK EXECUTION CLEANUP REMOVE: FAILED\n"
+        );
+    }
+
+    if (task_destroy(&task_execution_b) != 0)
+    {
+        task_test_fail(
+            "TASK EXECUTION CLEANUP DESTROY: FAILED\n"
+        );
+    }
+
+    if (task_execution_b.state !=
+            TASK_STATE_TERMINATED ||
+        task_execution_b.kernel_stack_base != 0 ||
+        task_execution_b.kernel_stack_top != 0)
+    {
+        task_test_fail(
+            "TASK EXECUTION CLEANUP RELEASE: FAILED\n"
+        );
+    }
+
     serial_write_string(
         "TASK EXECUTION: VERIFIED\n"
     );
@@ -868,9 +935,14 @@ static void task_execution_test_b(void *argument)
     }
 
     /*
-     * Return control to the test harness without returning into
-     * task bootstrap. Task B remains RUNNING because it is the
-     * active task after Task A terminates.
+     * Task B is still RUNNING and remains the scheduler's current
+     * task. Return to the harness without changing scheduler
+     * ownership so the primary A -> B termination contract can
+     * be asserted independently from the later cleanup path.
+     *
+     * When the harness restores B's saved context, execution
+     * resumes immediately after this switch and B performs the
+     * legitimate scheduler-owned cleanup handoff.
      */
     x86_64_context_switch(
         &task_execution_b.context,
@@ -878,7 +950,91 @@ static void task_execution_test_b(void *argument)
     );
 
     /*
-     * The context switch above transfers control to the harness.
-     * Execution must never return here during this test.
+     * B genuinely resumes here only after the harness has verified
+     * the primary termination-dispatch state.
+     *
+     * Construct a test-only cooperative continuation so B can
+     * leave RUNNING state through the real scheduler before its
+     * VMM-backed stack is reclaimed.
      */
+    task_execution_cleanup_task.id = 4;
+    task_execution_cleanup_task.state =
+        TASK_STATE_READY;
+    task_execution_cleanup_task.kernel_stack_base = 0;
+    task_execution_cleanup_task.kernel_stack_top = 0;
+    task_execution_cleanup_task.address_space = 0;
+    task_execution_cleanup_task.process = NULL;
+    task_execution_cleanup_task.entry =
+        task_execution_cleanup_entry;
+    task_execution_cleanup_task.argument = NULL;
+    task_execution_cleanup_task.wait_queue = NULL;
+    task_execution_cleanup_task.resume_authority =
+        TASK_RESUME_CONTEXT;
+    task_execution_cleanup_task.preempt_state.frame_address = 0;
+    task_execution_cleanup_task.preempt_state.valid = 0;
+
+    task_execution_cleanup_task.context.rbx = 0;
+    task_execution_cleanup_task.context.rbp = 0;
+    task_execution_cleanup_task.context.r12 = 0;
+    task_execution_cleanup_task.context.r13 = 0;
+    task_execution_cleanup_task.context.r14 = 0;
+    task_execution_cleanup_task.context.r15 = 0;
+
+    uint64_t cleanup_stack_top =
+        (uint64_t)(uintptr_t)(
+            task_execution_cleanup_stack + 4096
+        );
+
+    cleanup_stack_top -= sizeof(uint64_t);
+
+    *(uint64_t *)(uintptr_t)cleanup_stack_top = 0;
+
+    task_execution_cleanup_task.context.rsp =
+        cleanup_stack_top;
+    task_execution_cleanup_task.context.rip =
+        (uint64_t)(uintptr_t)
+            task_execution_cleanup_entry;
+
+    if (scheduler_add(
+            &task_execution_cleanup_task
+        ) != 0)
+    {
+        task_test_fail(
+            "TASK EXECUTION CLEANUP ADMISSION: FAILED\n"
+        );
+    }
+
+    if (scheduler_yield() != 0)
+    {
+        task_test_fail(
+            "TASK EXECUTION CLEANUP YIELD: FAILED\n"
+        );
+    }
+
+    /*
+     * The cleanup continuation owns the return to the harness.
+     * B must never resume into this entry during this test.
+     */
+    task_test_fail(
+        "TASK EXECUTION B RESUMED UNEXPECTEDLY\n"
+    );
+}
+
+static void task_execution_cleanup_entry(void *argument)
+{
+    (void)argument;
+
+    /*
+     * The scheduler has committed this manually constructed
+     * continuation as RUNNING. Transfer control back to the
+     * already-saved test harness continuation.
+     */
+    x86_64_context_switch(
+        &task_execution_cleanup_task.context,
+        &task_execution_harness_context
+    );
+
+    task_test_fail(
+        "TASK EXECUTION CLEANUP RESUMED UNEXPECTEDLY\n"
+    );
 }
