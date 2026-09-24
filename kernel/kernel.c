@@ -30,18 +30,7 @@
 #include "kernel/tests/execution_tests.h"
 #include "kernel/tests/lifecycle_tests.h"
 #include "kernel/lifecycle/lifecycle.h"
-
-/*
- * Enter the live interrupt-driven runtime phase.
- *
- * Kernel bring-up and deterministic verification are complete
- * before this boundary. From here onward, hardware interrupts
- * are intentionally part of normal runtime.
- */
-static void interrupts_enable_for_runtime(void)
-{
-    __asm__ volatile ("sti" ::: "memory");
-}
+#include "kernel/runtime/runtime.h"
 
 void kernel_main(void)
 {
@@ -344,43 +333,48 @@ void kernel_main(void)
     lifecycle_tests_run();
 
     /*
-     * Explicit transition from deterministic kernel bring-up
-     * into live interrupt-driven runtime.
+     * Deterministic bring-up is complete.
      *
-     * The timer-driven preemption runtime test executes after
-     * this boundary and therefore observes real hardware
-     * interrupt delivery.
+     * The production runtime establishes fresh registry,
+     * scheduler, and lifecycle ownership because the foundation
+     * tests intentionally use isolated reinitialization.
      */
-    timer_service_runtime_test_arm();
-
-    interrupts_enable_for_runtime();
-
-    timer_service_runtime_test_run();
-
-    preempt_runtime_tests_run();
-
-    serial_write_string(
-        "CONTEXT SWITCH: VERIFIED\n"
-    );
-
-    serial_write_string(
-        "TIMER-4 LAPIC CLOCK MIGRATION: ARMED\n"
-    );
-
-
-
-    /* --------------------------------------------------------
-       FINAL HALT
-       -------------------------------------------------------- */
-
-    serial_write_string(
-        "CPU HALTED\n"
-    );
-
-    for (;;)
+    if (kernel_runtime_init() != 0)
     {
-        __asm__ volatile (
-            "hlt"
+        serial_write_string(
+            "KERNEL PRODUCTION RUNTIME: INITIALIZATION FAILED\n"
         );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
     }
+
+    /*
+     * scheduler_start() establishes current-task ownership.
+     * kernel_runtime_start() then performs the explicit external
+     * first dispatch into the real Task continuation.
+     *
+     * Successful production runtime startup does not return.
+     */
+    if (kernel_runtime_start() != 0)
+    {
+        serial_write_string(
+            "KERNEL PRODUCTION SCHEDULER: START FAILED\n"
+        );
+
+        for (;;)
+        {
+            __asm__ volatile (
+                "cli\n"
+                "hlt"
+            );
+        }
+    }
+
+    __builtin_unreachable();
 }

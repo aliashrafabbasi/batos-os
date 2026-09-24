@@ -29,4 +29,22 @@ int execution_create_kernel_task(
     void *argument
 );
 
+/*
+ * Create and publish an additional kernel Task inside an already
+ * active Process.
+ *
+ * The Process and its address-space association already exist.
+ * Execution owns only the Task publication transaction:
+ * Task + Task Registry membership + Process/Task membership
+ * + READY scheduler membership.
+ */
+int execution_create_task(
+    struct process *process,
+    struct task *task,
+    uint64_t tid,
+    uint64_t address_space,
+    task_entry_t entry,
+    void *argument
+);
+
 #endif

@@ -1,10 +1,11 @@
 #include "execution.h"
 
 #include "../mm/vmm/vmm.h"
+#include "../process/process_registry.h"
 #include "../sched/task_registry.h"
 #include "../sched/scheduler.h"
 
-static int execution_rollback_kernel_task(
+static int execution_rollback_task(
     struct process *process,
     struct task *task,
     int task_registered,
@@ -25,6 +26,26 @@ static int execution_rollback_kernel_task(
 
     if (task_destroy(task) != 0)
         return -1;
+
+    return 0;
+}
+
+static int execution_rollback_kernel_task(
+    struct process *process,
+    struct task *task,
+    int task_registered,
+    int task_attached
+)
+{
+    if (execution_rollback_task(
+            process,
+            task,
+            task_registered,
+            task_attached
+        ) != 0)
+    {
+        return -1;
+    }
 
     if (process_terminate(process) != 0)
         return -1;
@@ -176,6 +197,130 @@ int execution_create_kernel_task(
      *
      * Keeping this assignment after scheduler admission guarantees
      * that every rollback path before this point remains unmanaged.
+     */
+    task->lifecycle_mode =
+        TASK_LIFECYCLE_MANAGED;
+
+    return 0;
+}
+
+int execution_create_task(
+    struct process *process,
+    struct task *task,
+    uint64_t tid,
+    uint64_t address_space,
+    task_entry_t entry,
+    void *argument
+)
+{
+    int task_registered = 0;
+    int task_attached = 0;
+
+    if (process == NULL ||
+        task == NULL ||
+        tid == 0 ||
+        address_space == 0 ||
+        entry == NULL)
+    {
+        return -1;
+    }
+
+    /*
+     * Additional Tasks must join an already published Process.
+     * Execution does not create or activate a new address space.
+     */
+    if (!process_registry_contains(process) ||
+        process->state != PROCESS_STATE_ACTIVE)
+    {
+        return -2;
+    }
+
+    if (address_space != process->address_space)
+        return -3;
+
+    if (address_space != vmm_get_pml4())
+        return -4;
+
+    /*
+     * task_create() constructs only the execution object.
+     */
+    if (task_create(
+            task,
+            tid,
+            address_space,
+            entry,
+            argument
+        ) != 0)
+    {
+        return -5;
+    }
+
+    /*
+     * Task identity becomes externally discoverable before
+     * Process membership is published.
+     */
+    if (task_registry_register(task) != 0)
+    {
+        if (execution_rollback_task(
+                process,
+                task,
+                0,
+                0
+            ) != 0)
+        {
+            return -6;
+        }
+
+        return -7;
+    }
+
+    task_registered = 1;
+
+    /*
+     * Process membership establishes the reciprocal ownership
+     * invariant and validates the address-space relationship.
+     */
+    if (process_attach_task(
+            process,
+            task
+        ) != 0)
+    {
+        if (execution_rollback_task(
+                process,
+                task,
+                task_registered,
+                0
+            ) != 0)
+        {
+            return -6;
+        }
+
+        return -8;
+    }
+
+    task_attached = 1;
+
+    /*
+     * READY scheduler ownership is the final publication point.
+     */
+    if (scheduler_add(task) != 0)
+    {
+        if (execution_rollback_task(
+                process,
+                task,
+                task_registered,
+                task_attached
+            ) != 0)
+        {
+            return -6;
+        }
+
+        return -9;
+    }
+
+    /*
+     * Terminal execution now participates in deferred
+     * production lifecycle reclamation.
      */
     task->lifecycle_mode =
         TASK_LIFECYCLE_MANAGED;

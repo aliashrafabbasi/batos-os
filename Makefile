@@ -47,6 +47,7 @@ C_SOURCES = \
     kernel/process/process_registry.c \
     kernel/execution/execution.c \
     kernel/lifecycle/lifecycle.c \
+    kernel/runtime/runtime.c \
     kernel/console/console.c \
     kernel/arch/x86_64/cpu/gdt.c \
     kernel/arch/x86_64/interrupt/idt.c \
@@ -63,6 +64,7 @@ C_SOURCES = \
     kernel/arch/x86_64/time/timer.c \
     kernel/arch/x86_64/time/timer_manager.c \
     kernel/arch/x86_64/time/timer_service.c \
+    kernel/arch/x86_64/time/clock_source.c \
     kernel/mm/heap/heap.c \
     kernel/sched/task.c \
     kernel/sched/task_registry.c \
