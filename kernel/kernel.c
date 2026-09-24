@@ -334,6 +334,15 @@ void kernel_main(void)
     lifecycle_tests_run();
     runtime_tests_run();
 
+#ifdef BATOS_PREEMPT_RUNTIME_TEST
+    /*
+     * PREEMPTION-2 is an isolated, non-returning runtime harness.
+     * It intentionally replaces production runtime startup for
+     * this explicit test build only.
+     */
+    preempt_runtime_tests_run();
+    __builtin_unreachable();
+#else
     /*
      * Deterministic bring-up is complete.
      *
@@ -379,4 +388,5 @@ void kernel_main(void)
     }
 
     __builtin_unreachable();
+#endif
 }

@@ -15,6 +15,8 @@ CFLAGS = -Wall -Wextra -O2 \
          -mcmodel=kernel \
          -I.
 
+CPPFLAGS = $(if $(BATOS_PREEMPT_RUNTIME_TEST),-DBATOS_PREEMPT_RUNTIME_TEST,)
+
 LDFLAGS = -T kernel/linker.ld -nostdlib -static
 
 BUILD_DIR = build
@@ -96,12 +98,16 @@ ASM_OBJECTS = \
 
 OBJECTS = $(C_OBJECTS) $(ASM_OBJECTS)
 
-.PHONY: all clean iso
+.PHONY: all clean iso preempt-runtime-test
 
 all: $(BUILD_DIR)/batos.iso
 
+preempt-runtime-test:
+	$(MAKE) clean
+	$(MAKE) BATOS_PREEMPT_RUNTIME_TEST=1
+
 %.o: %.c
-	$(CC) $(CFLAGS) -c $< -o $@
+	$(CC) $(CFLAGS) $(CPPFLAGS) -c $< -o $@
 
 $(BUILD_DIR)/interrupts.o: kernel/arch/x86_64/interrupt/interrupts.asm
 	$(NASM) -f elf64 $< -o $@
