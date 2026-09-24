@@ -162,6 +162,19 @@ int task_wake(
     struct task *task
 );
 
+/*
+ * Validate that a Task's execution state and owned resources are
+ * ready for final reclamation.
+ *
+ * This intentionally does not require Process, scheduler, or
+ * Task-registry ownership to have already been released. Those
+ * ownership checks belong to the caller performing the
+ * cross-subsystem teardown transaction.
+ */
+int task_validate_reclaim(
+    const struct task *task
+);
+
 int task_destroy(
     struct task *task
 );

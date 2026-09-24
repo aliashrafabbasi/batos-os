@@ -19,6 +19,30 @@
  * Process lifetime after successful creation, or Task lifetime
  * after successful creation.
  */
+
+/*
+ * Destroy a successfully published READY Task during an explicit
+ * execution-construction rollback.
+ *
+ * This is not the normal Task lifecycle/reaper path.
+ */
+int execution_destroy_task(
+    struct process *process,
+    struct task *task
+);
+
+/*
+ * Destroy a successfully published kernel execution unit,
+ * including its Process after all Task ownership is released.
+ *
+ * This is an initialization/transaction rollback boundary, not
+ * normal runtime termination.
+ */
+int execution_destroy_kernel_task(
+    struct process *process,
+    struct task *task
+);
+
 int execution_create_kernel_task(
     struct process *process,
     struct task *task,

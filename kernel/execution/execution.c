@@ -3,9 +3,10 @@
 #include "../mm/vmm/vmm.h"
 #include "../process/process_registry.h"
 #include "../sched/task_registry.h"
+#include "../sched/runqueue.h"
 #include "../sched/scheduler.h"
 
-static int execution_rollback_task(
+static int execution_rollback_task_internal(
     struct process *process,
     struct task *task,
     int task_registered,
@@ -30,14 +31,14 @@ static int execution_rollback_task(
     return 0;
 }
 
-static int execution_rollback_kernel_task(
+static int execution_rollback_kernel_task_internal(
     struct process *process,
     struct task *task,
     int task_registered,
     int task_attached
 )
 {
-    if (execution_rollback_task(
+    if (execution_rollback_task_internal(
             process,
             task,
             task_registered,
@@ -52,6 +53,147 @@ static int execution_rollback_kernel_task(
 
     if (process_destroy(process) != 0)
         return -1;
+
+    return 0;
+}
+
+static int execution_preflight_destroy_task(
+    struct process *process,
+    struct task *task
+)
+{
+    if (process == NULL ||
+        task == NULL)
+    {
+        return -1;
+    }
+
+    /*
+     * This cleanup boundary is valid only for a successfully
+     * published READY execution unit that has never entered
+     * execution.
+     */
+    if (task->state != TASK_STATE_READY ||
+        task->process != process ||
+        !task_registry_contains(task) ||
+        !process_registry_contains(process) ||
+        !runqueue_contains(task))
+    {
+        return -2;
+    }
+
+    /*
+     * Validate Task-local execution/resource state while external
+     * ownership is still intentionally present.
+     */
+    if (task_validate_reclaim(task) != 0)
+        return -3;
+
+    return 0;
+}
+
+static int execution_preflight_destroy_kernel_task(
+    struct process *process,
+    struct task *task
+)
+{
+    if (execution_preflight_destroy_task(
+            process,
+            task
+        ) != 0)
+    {
+        return -1;
+    }
+
+    /*
+     * The kernel-task creation transaction owns exactly one Task.
+     * Process destruction therefore requires exactly one current
+     * Process membership.
+     */
+    if (process->state != PROCESS_STATE_ACTIVE ||
+        process->task_count != 1)
+    {
+        return -2;
+    }
+
+    return 0;
+}
+
+int execution_destroy_task(
+    struct process *process,
+    struct task *task
+)
+{
+    if (execution_preflight_destroy_task(
+            process,
+            task
+        ) != 0)
+    {
+        return -1;
+    }
+
+    /*
+     * Complete preflight has succeeded. The following operations
+     * are the ownership-release commit and therefore are not
+     * treated as ordinary recoverable transaction failures.
+     *
+     * Publication order:
+     *     Task Registry -> Process -> Scheduler
+     *
+     * Teardown order:
+     *     Scheduler -> Process -> Task Registry -> Task.
+     */
+    if (runqueue_remove(task) != 0)
+        return -2;
+
+    if (process_detach_task(
+            process,
+            task
+        ) != 0)
+    {
+        return -3;
+    }
+
+    if (task_registry_unregister(task) != 0)
+        return -4;
+
+    if (task_destroy(task) != 0)
+        return -5;
+
+    return 0;
+}
+
+int execution_destroy_kernel_task(
+    struct process *process,
+    struct task *task
+)
+{
+    if (execution_preflight_destroy_kernel_task(
+            process,
+            task
+        ) != 0)
+    {
+        return -1;
+    }
+
+    if (execution_destroy_task(
+            process,
+            task
+        ) != 0)
+    {
+        /*
+         * The complete preflight has already succeeded.
+         * Failure here therefore indicates an internal invariant
+         * violation rather than an expected rollback condition.
+         */
+        return -2;
+    }
+
+    if (process_terminate(process) != 0)
+        return -3;
+
+    if (process_destroy(process) != 0)
+        return -4;
 
     return 0;
 }
@@ -131,7 +273,7 @@ int execution_create_kernel_task(
      */
     if (task_registry_register(task) != 0)
     {
-        if (execution_rollback_kernel_task(
+        if (execution_rollback_kernel_task_internal(
                 process,
                 task,
                 0,
@@ -155,7 +297,7 @@ int execution_create_kernel_task(
             task
         ) != 0)
     {
-        if (execution_rollback_kernel_task(
+        if (execution_rollback_kernel_task_internal(
                 process,
                 task,
                 task_registered,
@@ -177,7 +319,7 @@ int execution_create_kernel_task(
      */
     if (scheduler_add(task) != 0)
     {
-        if (execution_rollback_kernel_task(
+        if (execution_rollback_kernel_task_internal(
                 process,
                 task,
                 task_registered,
@@ -261,7 +403,7 @@ int execution_create_task(
      */
     if (task_registry_register(task) != 0)
     {
-        if (execution_rollback_task(
+        if (execution_rollback_task_internal(
                 process,
                 task,
                 0,
@@ -285,7 +427,7 @@ int execution_create_task(
             task
         ) != 0)
     {
-        if (execution_rollback_task(
+        if (execution_rollback_task_internal(
                 process,
                 task,
                 task_registered,
@@ -305,7 +447,7 @@ int execution_create_task(
      */
     if (scheduler_add(task) != 0)
     {
-        if (execution_rollback_task(
+        if (execution_rollback_task_internal(
                 process,
                 task,
                 task_registered,

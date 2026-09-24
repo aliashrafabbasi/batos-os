@@ -34,53 +34,13 @@ static void execution_cleanup_success(
     struct task *task
 )
 {
-    /*
-     * Successful Execution creation publishes READY ownership
-     * into the scheduler. Remove that ownership before the lower
-     * lifecycle destructors are invoked.
-     */
-    if (runqueue_remove(task) != 0)
-    {
-        execution_test_fail(
-            "EXECUTION CLEANUP: RUNQUEUE REMOVE FAILED\n"
-        );
-    }
-
-    if (process_detach_task(
+    if (execution_destroy_kernel_task(
             process,
             task
         ) != 0)
     {
         execution_test_fail(
-            "EXECUTION CLEANUP: PROCESS DETACH FAILED\n"
-        );
-    }
-
-    if (task_registry_unregister(task) != 0)
-    {
-        execution_test_fail(
-            "EXECUTION CLEANUP: TASK UNREGISTER FAILED\n"
-        );
-    }
-
-    if (task_destroy(task) != 0)
-    {
-        execution_test_fail(
-            "EXECUTION CLEANUP: TASK DESTROY FAILED\n"
-        );
-    }
-
-    if (process_terminate(process) != 0)
-    {
-        execution_test_fail(
-            "EXECUTION CLEANUP: PROCESS TERMINATE FAILED\n"
-        );
-    }
-
-    if (process_destroy(process) != 0)
-    {
-        execution_test_fail(
-            "EXECUTION CLEANUP: PROCESS DESTROY FAILED\n"
+            "EXECUTION CLEANUP: DESTROY FAILED\n"
         );
     }
 }

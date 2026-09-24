@@ -811,15 +811,16 @@ int task_wake(
     return 0;
 }
 
-int task_destroy(struct task *task)
+int task_validate_reclaim(
+    const struct task *task
+)
 {
     if (task == NULL)
         return -1;
 
     /*
-     * A task cannot be destroyed while the scheduler still owns
-     * it as the current task. This also protects the transient
-     * RUNNING -> TERMINATED -> dispatch window during task exit.
+     * A task cannot be reclaimed while the scheduler still owns
+     * it as the current execution unit.
      */
     if (scheduler_get_current() == task)
         return -1;
@@ -832,11 +833,9 @@ int task_destroy(struct task *task)
         return -1;
 
     /*
-     * Final destruction is only valid once execution ownership
-     * has ended and the task is no longer in an active lifetime
-     * state. READY is destroyable only after runqueue ownership
-     * is released; TERMINATED is destroyable after execution
-     * ownership has ended.
+     * Reclamation is valid only once execution ownership has
+     * ended and the task is no longer in an active execution
+     * state.
      */
     switch (task->state)
     {
@@ -853,24 +852,63 @@ int task_destroy(struct task *task)
     }
 
     /*
-     * A BLOCKED task has explicit wait-queue ownership and must
-     * remain alive until that ownership is released.
+     * A BLOCKED task has explicit wait-queue ownership.
      */
     if (task->wait_queue != NULL)
         return -1;
 
     /*
-     * Process owns Task membership. A Task must be detached by
-     * the Process lifecycle/reaping owner before its resources
-     * can be reclaimed.
+     * Validate the complete Task-owned kernel-stack mapping before
+     * any destructive operation.
+     *
+     * This deliberately does not inspect Process, runqueue, or
+     * Task-registry ownership. Those are external ownership
+     * contracts handled by the lifecycle/transaction owner.
+     */
+    if (task->kernel_stack_base != 0)
+    {
+        for (uint64_t page = 0;
+             page < TASK_KERNEL_STACK_PAGE_COUNT;
+             page++)
+        {
+            uint64_t virtual_address =
+                task->kernel_stack_base +
+                page * VMM_PAGE_SIZE;
+
+            uint64_t physical = 0;
+
+            if (vmm_translate(
+                    task->address_space,
+                    virtual_address,
+                    &physical
+                ) != 0)
+            {
+                return -1;
+            }
+
+            if (physical !=
+                task->kernel_stack_pages[page])
+            {
+                return -1;
+            }
+        }
+    }
+
+    return 0;
+}
+
+int task_destroy(struct task *task)
+{
+    if (task_validate_reclaim(task) != 0)
+        return -1;
+
+    /*
+     * Final Task destruction requires all external ownership to
+     * have been released first.
      */
     if (task->process != NULL)
         return -1;
 
-    /*
-     * Task-owned resources may only be destroyed after
-     * scheduler and registry ownership have been released.
-     */
     if (runqueue_contains(task))
         return -1;
 
