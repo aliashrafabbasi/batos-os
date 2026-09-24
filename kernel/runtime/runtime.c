@@ -1,4 +1,5 @@
 #include "runtime.h"
+#include "runtime_test.h"
 
 #include "../arch/x86_64/sched/context.h"
 #include "../arch/x86_64/sched/preempt.h"
@@ -36,6 +37,75 @@ static struct x86_64_context
 
 static uint8_t kernel_runtime_initialized = 0;
 static uint8_t kernel_runtime_root_reaped_reported = 0;
+
+/*
+ * Test-only one-shot failure injection at the production runtime
+ * composition boundary.
+ *
+ * This deliberately lives in runtime.c rather than in Execution,
+ * Scheduler, Task, or Registry code because the test verifies
+ * Runtime's ownership rollback contract, not a lower-layer fault
+ * model.
+ */
+static uint8_t kernel_runtime_fail_reaper_once = 0;
+
+/*
+ * Production runtime owns composition rollback for objects that it
+ * has successfully published. Each flag means the corresponding
+ * execution unit completed its publication transaction and therefore
+ * must be destroyed through the execution-layer ownership boundary.
+ */
+static uint8_t kernel_runtime_root_published = 0;
+static uint8_t kernel_runtime_reaper_published = 0;
+
+void kernel_runtime_test_fail_reaper_once(void)
+{
+    kernel_runtime_fail_reaper_once = 1;
+}
+
+static int kernel_runtime_rollback(void)
+{
+    /*
+     * Roll back in reverse publication order.
+     *
+     * Reaper was published after root, so it must be destroyed first.
+     * The execution layer releases Scheduler -> Process membership ->
+     * Task Registry -> Task ownership for us.
+     */
+    if (kernel_runtime_reaper_published)
+    {
+        if (execution_destroy_task(
+                &kernel_runtime_process,
+                &kernel_runtime_reaper_task
+            ) != 0)
+        {
+            return -1;
+        }
+
+        kernel_runtime_reaper_published = 0;
+    }
+
+    /*
+     * Root owns the kernel Process lifecycle. Its destruction therefore
+     * also terminates and destroys the Process after the Task is gone.
+     */
+    if (kernel_runtime_root_published)
+    {
+        if (execution_destroy_kernel_task(
+                &kernel_runtime_process,
+                &kernel_runtime_root_task
+            ) != 0)
+        {
+            return -2;
+        }
+
+        kernel_runtime_root_published = 0;
+    }
+
+    kernel_runtime_root_reaped_reported = 0;
+
+    return 0;
+}
 
 static void kernel_runtime_halt_failure(
     const char *message
@@ -198,10 +268,26 @@ int kernel_runtime_init(void)
         return -8;
     }
 
+    kernel_runtime_root_published = 1;
+
     /*
      * TID 2 joins the same Process and provides the persistent
      * lifecycle execution context.
+     *
+     * The one-shot failure is consumed exactly at this production
+     * composition boundary so the following real initialization
+     * attempt is unaffected.
      */
+    if (kernel_runtime_fail_reaper_once)
+    {
+        kernel_runtime_fail_reaper_once = 0;
+
+        if (kernel_runtime_rollback() != 0)
+            return -9;
+
+        return -9;
+    }
+
     if (execution_create_task(
             &kernel_runtime_process,
             &kernel_runtime_reaper_task,
@@ -211,8 +297,13 @@ int kernel_runtime_init(void)
             NULL
         ) != 0)
     {
+        if (kernel_runtime_rollback() != 0)
+            return -9;
+
         return -9;
     }
+
+    kernel_runtime_reaper_published = 1;
 
     if (kernel_runtime_process.state !=
             PROCESS_STATE_ACTIVE ||
@@ -226,6 +317,9 @@ int kernel_runtime_init(void)
         kernel_runtime_reaper_task.state !=
             TASK_STATE_READY)
     {
+        if (kernel_runtime_rollback() != 0)
+            return -10;
+
         return -10;
     }
 

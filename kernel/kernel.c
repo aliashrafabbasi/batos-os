@@ -29,6 +29,7 @@
 #include "kernel/tests/process_tests.h"
 #include "kernel/tests/execution_tests.h"
 #include "kernel/tests/lifecycle_tests.h"
+#include "kernel/tests/runtime_tests.h"
 #include "kernel/lifecycle/lifecycle.h"
 #include "kernel/runtime/runtime.h"
 
@@ -331,6 +332,7 @@ void kernel_main(void)
 
     preempt_authority_tests_run();
     lifecycle_tests_run();
+    runtime_tests_run();
 
     /*
      * Deterministic bring-up is complete.

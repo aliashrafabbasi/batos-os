@@ -44,6 +44,7 @@ C_SOURCES = \
     kernel/process/process.c \
     kernel/tests/execution_tests.c \
     kernel/tests/lifecycle_tests.c \
+    kernel/tests/runtime_tests.c \
     kernel/process/process_registry.c \
     kernel/execution/execution.c \
     kernel/lifecycle/lifecycle.c \
